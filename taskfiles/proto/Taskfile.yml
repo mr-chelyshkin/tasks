@@ -7,17 +7,17 @@ includes:
     taskfile: ../docker/Taskfile.yml
     internal: true
 
-vars:
-  image:          '{{if .PROTO_IMAGE}}{{.PROTO_IMAGE}}{{else}}ghcr.io/soltihq/ci/proto:{{.proto_version}}{{end}}'
-
-  proto_version:  '{{.PROTO_VERSION  | default "1.50.0"}}'
-  default_branch: '{{.DEFAULT_BRANCH | default "main"}}'
-
 tasks:
   # Run a protobuf tool command in the container.
   _proto/tool:
     requires:
       vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      proto_version: '{{.context.PROTO_VERSION | default "1.50.0"}}'
+      image:         '{{if .context.PROTO_IMAGE}}{{.context.PROTO_IMAGE}}{{else}}ghcr.io/soltihq/ci/proto:{{.proto_version}}{{end}}'
     cmds:
       - task: docker:run
         vars:
@@ -25,14 +25,14 @@ tasks:
           CMD:       '{{.CMD}}'
           MOUNT_DIR: .
 
-          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
-          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
-          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
-          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
-          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
 
           ENVS:
             - HOME=/tmp
@@ -50,6 +50,9 @@ tasks:
                 xargs -0 -r clang-format "$@"
             ' clang-format {{.FORMAT_ARGS}}
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Lint protobuf sources with Buf.
   lint:
     vars:
@@ -58,6 +61,9 @@ tasks:
       - task: _proto/tool
         vars:
           CMD: 'buf lint {{.buf_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Build the protobuf schema with Buf.
   build:
@@ -68,6 +74,9 @@ tasks:
         vars:
           CMD: 'buf build {{.buf_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Check protobuf formatting (clang-format).
   format/clang:
     vars:
@@ -76,6 +85,9 @@ tasks:
       - task: _proto/clang/format
         vars:
           FORMAT_ARGS: '{{.format_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Apply clang-format to protobuf sources.
   format/clang/fix:
@@ -87,11 +99,18 @@ tasks:
         vars:
           FORMAT_ARGS: '{{.format_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Check the protobuf schema for breaking changes against a baseline.
   breaking:
     vars:
-      against: '{{.AGAINST | default (printf ".git#branch=%s" .default_branch)}}'
+      default_branch: '{{.DEFAULT_BRANCH | default "main"}}'
+      against:        '{{.AGAINST | default (printf ".git#branch=%s" .default_branch)}}'
     cmds:
       - task: _proto/tool
         vars:
           CMD: 'buf breaking --against {{.against | shellQuote}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

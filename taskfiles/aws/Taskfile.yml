@@ -7,15 +7,17 @@ includes:
     taskfile: ../docker/Taskfile.yml
     internal: true
 
-vars:
-  aws_version: '{{.AWS_VERSION | default "2.36.24"}}'
-  image:       '{{if .AWS_IMAGE}}{{.AWS_IMAGE}}{{else}}ghcr.io/soltihq/ci/aws:{{.aws_version}}{{end}}'
-
 tasks:
   # Run an AWS CLI command in container.
   _aws/tool:
     requires:
       vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      aws_version: '{{.context.AWS_VERSION | default "2.36.24"}}'
+      image:       '{{if .context.AWS_IMAGE}}{{.context.AWS_IMAGE}}{{else}}ghcr.io/soltihq/ci/aws:{{.aws_version}}{{end}}'
     cmds:
       - task: docker:run
         vars:
@@ -23,14 +25,14 @@ tasks:
           CMD:       '{{.CMD}}'
           MOUNT_DIR: .
 
-          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
-          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
-          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
-          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
-          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
 
           ENVS:
             - HOME=/tmp
@@ -85,6 +87,9 @@ tasks:
                 --only-show-errors
             '
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Create a CloudFront cache invalidation.
   cloudfront/cache/invalidate:
     requires:
@@ -115,3 +120,6 @@ tasks:
                 --distribution-id "$TASKS_DISTRIBUTION_ID" \
                 --id "$invalidation_id"
             '
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

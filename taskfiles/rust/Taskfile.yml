@@ -11,31 +11,34 @@ vars:
   project_root:
     sh: git rev-parse --show-toplevel
 
-  cache_dir: '{{.RUST_CACHE_DIR | default ".cache/rust"}}'
-
 tasks:
   # Run a Cargo command in the container.
   _cargo/tool:
     requires:
       vars: [CMD]
     vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      cache_dir: '{{.context.RUST_CACHE_DIR | default ".cache/rust"}}'
+
       rust_version:
         sh: |
           manifest_path={{printf "%s/Cargo.toml" .project_root | shellQuote}}
 
-          if [ -n {{.RUST_VERSION | default "" | shellQuote}} ]; then
-            printf '%s\n' {{.RUST_VERSION | default "" | shellQuote}}
-          elif [ -z {{.RUST_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
+          if [ -n {{.context.RUST_VERSION | default "" | shellQuote}} ]; then
+            printf '%s\n' {{.context.RUST_VERSION | default "" | shellQuote}}
+          elif [ -z {{.context.RUST_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
             sed -nE "s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" \
               "$manifest_path" | head -n 1
           fi
 
-      image: '{{if .RUST_IMAGE}}{{.RUST_IMAGE}}{{else}}ghcr.io/soltihq/ci/rust:{{.rust_version}}{{end}}'
+      image: '{{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE}}{{else}}ghcr.io/soltihq/ci/rust:{{.rust_version}}{{end}}'
 
-      rust_flags:    '{{.RUSTFLAGS    | default "-D warnings"}}'
-      rustdoc_flags: '{{.RUSTDOCFLAGS | default ""}}'
+      rust_flags:    '{{.RUSTFLAGS    | default .context.RUSTFLAGS    | default "-D warnings"}}'
+      rustdoc_flags: '{{.RUSTDOCFLAGS | default .context.RUSTDOCFLAGS | default ""}}'
     preconditions:
-      - sh: test -n {{if .RUST_IMAGE}}{{.RUST_IMAGE | shellQuote}}{{else}}{{.rust_version | default "" | shellQuote}}{{end}}
+      - sh: test -n {{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE | shellQuote}}{{else}}{{.rust_version | default "" | shellQuote}}{{end}}
         msg: Set RUST_VERSION or RUST_IMAGE, or add rust-version to Cargo.toml.
     cmds:
       - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
@@ -45,14 +48,14 @@ tasks:
           CMD:       '{{.CMD}}'
           MOUNT_DIR: .
 
-          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
-          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
-          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
-          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
-          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
 
           VOLUMES:
             - '{{.project_root}}/{{.cache_dir}}:/tmp/rust-cache:rw'
@@ -75,6 +78,9 @@ tasks:
         vars:
           CMD: 'cargo fmt {{.fmt_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Type-check the Rust project.
   check:
     vars:
@@ -83,6 +89,9 @@ tasks:
       - task: _cargo/tool
         vars:
           CMD: 'cargo check {{.check_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Build the selected Rust package with cargo build.
   build:
@@ -95,6 +104,9 @@ tasks:
         vars:
           CMD: 'cargo build -p {{.CRATE | shellQuote}} {{.build_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Lint Rust targets with cargo clippy.
   clippy:
     vars:
@@ -103,6 +115,9 @@ tasks:
       - task: _cargo/tool
         vars:
           CMD: 'cargo clippy {{.clippy_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Run Rust tests with cargo test.
   test:
@@ -113,6 +128,9 @@ tasks:
         vars:
           CMD: 'cargo test {{.test_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Run Rust benchmarks with cargo bench.
   bench:
     vars:
@@ -122,12 +140,18 @@ tasks:
         vars:
           CMD: 'cargo bench {{.bench_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Scan Rust dependencies.
   audit:
     cmds:
       - task: _cargo/tool
         vars:
           CMD: cargo audit
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Validate publishing the selected crate without uploading it.
   publish/dry-run:
@@ -140,6 +164,9 @@ tasks:
         vars:
           CMD: 'cargo publish --dry-run -p {{.CRATE | shellQuote}} {{.publish_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # List files included in the selected crate package.
   package/list:
     requires:
@@ -151,6 +178,9 @@ tasks:
         vars:
           CMD: 'cargo package --list -p {{.CRATE | shellQuote}} {{.package_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Build Rust API documentation while denying rustdoc warnings.
   doc/build:
     vars:
@@ -160,6 +190,9 @@ tasks:
         vars:
           RUSTDOCFLAGS: -D warnings
           CMD:          'cargo doc {{.doc_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Build Rust API docs.
   doc/build-nightly:
@@ -180,6 +213,9 @@ tasks:
             -Zrustdoc-scrape-examples
             --config 'build.rustdocflags=["--cfg","docsrs","-Z","unstable-options","--cap-lints","warn"]'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Format Rust source.
   fmt/fix:
     desc: Run cargo fmt in the configured container.
@@ -190,6 +226,9 @@ tasks:
         vars:
           CMD: 'cargo fmt {{.fmt_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Apply cargo audit fixes to vulnerable dependencies.
   audit/fix:
     desc: Run cargo audit fix.
@@ -197,3 +236,6 @@ tasks:
       - task: _cargo/tool
         vars:
           CMD: cargo audit fix
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

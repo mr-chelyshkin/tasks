@@ -11,27 +11,30 @@ vars:
   project_root:
     sh: git rev-parse --show-toplevel
 
-  cache_dir: '{{.GO_CACHE_DIR | default ".cache/go"}}'
-
 tasks:
   # Run an arbitrary Go toolchain command in the configured container.
   _go/tool:
     requires:
       vars: [CMD]
     vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      cache_dir: '{{.context.GO_CACHE_DIR | default ".cache/go"}}'
+
       go_version:
         sh: |
           manifest_path={{printf "%s/go.mod" .project_root | shellQuote}}
 
-          if [ -n {{.GO_VERSION | default "" | shellQuote}} ]; then
-            printf '%s\n' {{.GO_VERSION | default "" | shellQuote}}
-          elif [ -z {{.GO_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
+          if [ -n {{.context.GO_VERSION | default "" | shellQuote}} ]; then
+            printf '%s\n' {{.context.GO_VERSION | default "" | shellQuote}}
+          elif [ -z {{.context.GO_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
             sed -nE 's/^go[[:space:]]+([^[:space:]]+).*/\1/p' "$manifest_path" | head -n 1
           fi
 
-      image: '{{if .GO_IMAGE}}{{.GO_IMAGE}}{{else}}ghcr.io/soltihq/ci/golang:{{.go_version}}{{end}}'
+      image: '{{if .context.GO_IMAGE}}{{.context.GO_IMAGE}}{{else}}ghcr.io/soltihq/ci/golang:{{.go_version}}{{end}}'
     preconditions:
-      - sh: test -n {{if .GO_IMAGE}}{{.GO_IMAGE | shellQuote}}{{else}}{{.go_version | default "" | shellQuote}}{{end}}
+      - sh: test -n {{if .context.GO_IMAGE}}{{.context.GO_IMAGE | shellQuote}}{{else}}{{.go_version | default "" | shellQuote}}{{end}}
         msg: Set GO_VERSION or GO_IMAGE, or add a go directive to go.mod.
     cmds:
       - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
@@ -41,14 +44,14 @@ tasks:
           CMD:       '{{.CMD}}'
           MOUNT_DIR: .
 
-          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
-          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
-          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
-          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
-          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
 
           VOLUMES:
             - '{{.project_root}}/{{.cache_dir}}:/tmp/go-cache:rw'
@@ -74,6 +77,9 @@ tasks:
               fi
             '
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Format tracked Go files with gofumpt.
   fmt:
     desc: Apply gofumpt in the configured container.
@@ -83,6 +89,9 @@ tasks:
           CMD: |
             sh -c 'git ls-files "*.go" | grep -v "^vendor/" | xargs -r gofumpt -l -w'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Run golangci-lint with the configured arguments.
   golangci:
     vars:
@@ -91,6 +100,9 @@ tasks:
       - task: _go/tool
         vars:
           CMD: 'golangci-lint run {{.lint_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Build a named Go binary for the configured target platform.
   build:
@@ -120,6 +132,9 @@ tasks:
               -o {{printf "%s/%s-%s-%s" .output_dir .NAME .go_os .go_arch | shellQuote}} \
               {{.main_pkg | shellQuote}}
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Scan Go packages for known vulnerabilities.
   govulncheck:
     vars:
@@ -128,6 +143,9 @@ tasks:
       - task: _go/tool
         vars:
           CMD: 'govulncheck {{.vuln_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Run Go tests with the configured arguments.
   test:
@@ -138,6 +156,9 @@ tasks:
         vars:
           CMD: 'go test {{.test_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Update go.mod and go.sum with go mod tidy.
   tidy:
     desc: Run go mod tidy.
@@ -146,6 +167,9 @@ tasks:
         vars:
           CMD: go mod tidy
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Run go mod vendor.
   vendor:
     desc: Run go mod vendor.
@@ -153,3 +177,6 @@ tasks:
       - task: _go/tool
         vars:
           CMD: go mod vendor
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

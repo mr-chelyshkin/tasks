@@ -11,17 +11,20 @@ vars:
   project_root:
     sh: git rev-parse --show-toplevel
 
-  image: '{{if .TERRAFORM_IMAGE}}{{.TERRAFORM_IMAGE}}{{else}}ghcr.io/soltihq/ci/terraform:{{.terraform_version}}{{end}}'
-
-  terraform_dir:     '{{.TERRAFORM_DIR       | default "tf"}}'
-  terraform_version: '{{.TERRAFORM_VERSION   | default "1.15.8"}}'
-  cache_dir:         '{{.TERRAFORM_CACHE_DIR | default ".cache/terraform"}}'
-
 tasks:
   # Run a Terraform command in the configured container.
   _terraform/tool:
     requires:
       vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      terraform_dir:     '{{.context.TERRAFORM_DIR       | default "tf"}}'
+      terraform_version: '{{.context.TERRAFORM_VERSION   | default "1.15.8"}}'
+      cache_dir:         '{{.context.TERRAFORM_CACHE_DIR | default ".cache/terraform"}}'
+
+      image: '{{if .context.TERRAFORM_IMAGE}}{{.context.TERRAFORM_IMAGE}}{{else}}ghcr.io/soltihq/ci/terraform:{{.terraform_version}}{{end}}'
     cmds:
       - mkdir -p {{printf "%s/%s/plugins" .project_root .cache_dir | shellQuote}}
       - task: docker:run
@@ -32,14 +35,14 @@ tasks:
 
           WORKDIR: '/workspace/{{.terraform_dir}}'
 
-          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
-          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
-          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
-          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
-          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
 
           VOLUMES:
             - '{{.project_root}}/{{.cache_dir}}:/tmp/terraform-cache:rw'
@@ -59,6 +62,9 @@ tasks:
         vars:
           CMD: 'terraform init {{.init_args}}'
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Check Terraform formatting.
   fmt:
     vars:
@@ -67,6 +73,9 @@ tasks:
       - task: _terraform/tool
         vars:
           CMD: 'terraform fmt {{.fmt_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Initialize without a backend and validate the Terraform configuration.
   validate:
@@ -77,9 +86,15 @@ tasks:
       - task: _terraform/tool
         vars:
           CMD: 'terraform init {{.init_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
       - task: _terraform/tool
         vars:
           CMD: 'terraform validate {{.validate_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Initialize and apply the Terraform configuration.
   apply:
@@ -90,9 +105,15 @@ tasks:
       - task: _terraform/init
         vars:
           INIT_ARGS: '{{.init_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
       - task: _terraform/tool
         vars:
           CMD: 'terraform apply {{.apply_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
   # Apply Terraform formatting.
   fmt/fix:
@@ -103,3 +124,6 @@ tasks:
       - task: _terraform/tool
         vars:
           CMD: 'terraform fmt {{.fmt_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

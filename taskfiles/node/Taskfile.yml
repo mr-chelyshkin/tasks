@@ -11,17 +11,19 @@ vars:
   project_root:
     sh: git rev-parse --show-toplevel
 
-  image: '{{if .NODE_IMAGE}}{{.NODE_IMAGE}}{{else}}ghcr.io/soltihq/ci/node:{{.node_version}}{{end}}'
-
-  app_dir:      '{{.APP_DIR        | default "app"}}'
-  cache_dir:    '{{.NODE_CACHE_DIR | default ".cache/node"}}'
-  node_version: '{{.NODE_VERSION   | default "22.23.1"}}'
-
 tasks:
   # Run npm command in container.
   _npm/tool:
     requires:
       vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      node_version: '{{.context.NODE_VERSION   | default "22.23.1"}}'
+      image:        '{{if .context.NODE_IMAGE}}{{.context.NODE_IMAGE}}{{else}}ghcr.io/soltihq/ci/node:{{.node_version}}{{end}}'
+      app_dir:      '{{.context.APP_DIR        | default "app"}}'
+      cache_dir:    '{{.context.NODE_CACHE_DIR | default ".cache/node"}}'
     cmds:
       - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
       - task: docker:run
@@ -31,14 +33,14 @@ tasks:
           WORKDIR:   '/workspace/{{.app_dir}}'
           MOUNT_DIR: .
 
-          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
-          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
-          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
-          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
-          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
 
           VOLUMES:
             - '{{.project_root}}/{{.cache_dir}}:/tmp/npm-cache:rw'
@@ -60,6 +62,9 @@ tasks:
               npm ci && exec npm run "$1"
             ' npm {{.SCRIPT | shellQuote}}
 
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   # Run npm audit.
   audit:
     vars:
@@ -71,3 +76,6 @@ tasks:
             sh -c '
               npm ci && exec npm audit --audit-level "$1"
             ' npm {{.audit_level | shellQuote}}
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
