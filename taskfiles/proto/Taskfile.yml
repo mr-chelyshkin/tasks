@@ -48,7 +48,7 @@ tasks:
       - task: _proto/tool
         vars:
           CMD: |
-            sh -c '
+            bash -e -o pipefail -c '
               git ls-files -z -- "*.proto" |
                 xargs -0 -r clang-format "$@"
             ' clang-format {{.FORMAT_ARGS}}

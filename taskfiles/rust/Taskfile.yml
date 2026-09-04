@@ -207,7 +207,7 @@ tasks:
         vars:
           RUSTFLAGS: --cap-lints warn
           CMD: >-
-            cargo +nightly rustdoc
+            sh -eu -c 'exec cargo +"$RUST_VERSION" rustdoc "$@"' cargo-rustdoc
             --lib
             --manifest-path {{.manifest_path | shellQuote}}
             {{.docs_args}}
@@ -217,7 +217,7 @@ tasks:
             --config 'build.rustdocflags=["--cfg","docsrs","-Z","unstable-options","--cap-lints","warn"]'
 
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict) (.TASK_CONTEXT | default .) (dict "RUST_IMAGE" "rustlang/rust:nightly" "RUST_VERSION" "" "CONTAINER_PULL_POLICY" "always")'
 
   # Format Rust source.
   fmt/fix:
