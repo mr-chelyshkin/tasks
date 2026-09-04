@@ -46,16 +46,19 @@ tasks:
             - AWS_DEFAULT_REGION
             - '{{if .SOURCE_DIR}}TASKS_SOURCE_DIR={{.SOURCE_DIR}}{{end}}'
             - '{{if .BUCKET}}TASKS_BUCKET={{.BUCKET}}{{end}}'
+            - '{{if .IMMUTABLE_PATTERNS}}TASKS_IMMUTABLE_PATTERNS={{.IMMUTABLE_PATTERNS}}{{end}}'
             - '{{if .IMMUTABLE_CACHE_CONTROL}}TASKS_IMMUTABLE_CACHE_CONTROL={{.IMMUTABLE_CACHE_CONTROL}}{{end}}'
             - '{{if .MUTABLE_CACHE_CONTROL}}TASKS_MUTABLE_CACHE_CONTROL={{.MUTABLE_CACHE_CONTROL}}{{end}}'
             - '{{if .DISTRIBUTION_ID}}TASKS_DISTRIBUTION_ID={{.DISTRIBUTION_ID}}{{end}}'
             - '{{if .INVALIDATION_PATHS}}TASKS_INVALIDATION_PATHS={{.INVALIDATION_PATHS}}{{end}}'
 
-  # Upload a static to S3.
+  # Upload a static site to S3 with explicit cache policies.
   s3/upload/static:
     requires:
       vars: [SOURCE_DIR, BUCKET]
     vars:
+      # AWS CLI patterns for content-addressed assets, one pattern per line.
+      immutable_patterns:      '{{.IMMUTABLE_PATTERNS      | default ""}}'
       immutable_cache_control: '{{.IMMUTABLE_CACHE_CONTROL | default "public,max-age=31536000,immutable"}}'
       mutable_cache_control:   '{{.MUTABLE_CACHE_CONTROL   | default "no-cache,no-store,must-revalidate"}}'
     cmds:
@@ -63,6 +66,7 @@ tasks:
         vars:
           SOURCE_DIR:              '{{.SOURCE_DIR}}'
           BUCKET:                  '{{.BUCKET}}'
+          IMMUTABLE_PATTERNS:      '{{.immutable_patterns}}'
           IMMUTABLE_CACHE_CONTROL: '{{.immutable_cache_control}}'
           MUTABLE_CACHE_CONTROL:   '{{.mutable_cache_control}}'
 
@@ -73,18 +77,58 @@ tasks:
               source_dir="/workspace/$TASKS_SOURCE_DIR"
 
               test -d "$source_dir"
+
+              if [ -L "$source_dir/index.html" ]; then
+                printf "index.html must not be a symbolic link\n" >&2
+                exit 1
+              fi
+
               test -f "$source_dir/index.html"
 
-              aws s3 sync \
-                "$source_dir" \
-                "s3://$TASKS_BUCKET" \
-                --exclude "index.html" \
-                --cache-control "$TASKS_IMMUTABLE_CACHE_CONTROL" \
+              immutable_sync_args=(
+                s3 sync
+                "$source_dir"
+                "s3://$TASKS_BUCKET"
+                --no-follow-symlinks
+                --exclude "*"
+              )
+              mutable_sync_args=(
+                s3 sync
+                "$source_dir"
+                "s3://$TASKS_BUCKET"
+                --no-follow-symlinks
+              )
+              immutable_pattern_count=0
+
+              while IFS= read -r pattern; do
+                [ -n "$pattern" ] || continue
+
+                immutable_sync_args+=(--include "$pattern")
+                mutable_sync_args+=(--exclude "$pattern")
+                immutable_pattern_count=$((immutable_pattern_count + 1))
+              done <<< "${TASKS_IMMUTABLE_PATTERNS:-}"
+
+              immutable_sync_args+=(
+                --exclude "index.html"
+                --cache-control "$TASKS_IMMUTABLE_CACHE_CONTROL"
                 --only-show-errors
+              )
+              mutable_sync_args+=(
+                --exclude "index.html"
+                --cache-control "$TASKS_MUTABLE_CACHE_CONTROL"
+                --only-show-errors
+              )
+
+              if ((immutable_pattern_count > 0)); then
+                aws "${immutable_sync_args[@]}"
+              fi
+
+              aws "${mutable_sync_args[@]}"
 
               exec aws s3 cp \
                 "$source_dir/index.html" \
                 "s3://$TASKS_BUCKET/index.html" \
+                --no-follow-symlinks \
                 --cache-control "$TASKS_MUTABLE_CACHE_CONTROL" \
                 --content-type "text/html; charset=utf-8" \
                 --only-show-errors

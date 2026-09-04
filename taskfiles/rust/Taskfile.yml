@@ -34,7 +34,7 @@ tasks:
             sed -nE "s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" \
               "$manifest_path" | head -n 1
           fi
-      image: '{{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE}}{{else}}ghcr.io/soltihq/ci/rust:{{.rust_version}}{{end}}'
+      image: '{{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/rust:{{.rust_version}}{{end}}'
 
       rust_flags:    '{{.RUSTFLAGS    | default .context.RUSTFLAGS    | default "-D warnings"}}'
       rustdoc_flags: '{{.RUSTDOCFLAGS | default .context.RUSTDOCFLAGS | default ""}}'
