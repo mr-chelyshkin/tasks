@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+vars:
+  image:          '{{if .PROTO_IMAGE}}{{.PROTO_IMAGE}}{{else}}ghcr.io/soltihq/ci/proto:{{.proto_version}}{{end}}'
+
+  proto_version:  '{{.PROTO_VERSION  | default "1.50.0"}}'
+  default_branch: '{{.DEFAULT_BRANCH | default "main"}}'
+
+tasks:
+  # Run a protobuf tool command in the container.
+  _proto/tool:
+    requires:
+      vars: [CMD]
+    cmds:
+      - task: docker:run
+        vars:
+          IMAGE:     '{{.image}}'
+          CMD:       '{{.CMD}}'
+          MOUNT_DIR: .
+
+          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
+          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
+          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
+          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
+          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+
+          ENVS:
+            - HOME=/tmp
+
+  # Run clang-format on protobuf sources.
+  _proto/clang/format:
+    requires:
+      vars: [FORMAT_ARGS]
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: |
+            sh -c '
+              git ls-files -z -- "*.proto" |
+                xargs -0 -r clang-format "$@"
+            ' clang-format {{.FORMAT_ARGS}}
+
+  # Lint protobuf sources with Buf.
+  lint:
+    vars:
+      buf_args: '{{.BUF_ARGS | default ""}}'
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: 'buf lint {{.buf_args}}'
+
+  # Build the protobuf schema with Buf.
+  build:
+    vars:
+      buf_args: '{{.BUF_ARGS | default ""}}'
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: 'buf build {{.buf_args}}'
+
+  # Check protobuf formatting (clang-format).
+  format/clang:
+    vars:
+      format_args: '{{.FORMAT_ARGS | default "--dry-run --Werror"}}'
+    cmds:
+      - task: _proto/clang/format
+        vars:
+          FORMAT_ARGS: '{{.format_args}}'
+
+  # Apply clang-format to protobuf sources.
+  format/clang/fix:
+    desc: Apply clang-format in the configured container.
+    vars:
+      format_args: '{{.FORMAT_ARGS | default "-i"}}'
+    cmds:
+      - task: _proto/clang/format
+        vars:
+          FORMAT_ARGS: '{{.format_args}}'
+
+  # Check the protobuf schema for breaking changes against a baseline.
+  breaking:
+    vars:
+      against: '{{.AGAINST | default (printf ".git#branch=%s" .default_branch)}}'
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: 'buf breaking --against {{.against | shellQuote}}'

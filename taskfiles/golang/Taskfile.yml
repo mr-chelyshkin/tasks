@@ -1,0 +1,155 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+vars:
+  project_root:
+    sh: git rev-parse --show-toplevel
+
+  cache_dir: '{{.GO_CACHE_DIR | default ".cache/go"}}'
+
+tasks:
+  # Run an arbitrary Go toolchain command in the configured container.
+  _go/tool:
+    requires:
+      vars: [CMD]
+    vars:
+      go_version:
+        sh: |
+          manifest_path={{printf "%s/go.mod" .project_root | shellQuote}}
+
+          if [ -n {{.GO_VERSION | default "" | shellQuote}} ]; then
+            printf '%s\n' {{.GO_VERSION | default "" | shellQuote}}
+          elif [ -z {{.GO_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
+            sed -nE 's/^go[[:space:]]+([^[:space:]]+).*/\1/p' "$manifest_path" | head -n 1
+          fi
+
+      image: '{{if .GO_IMAGE}}{{.GO_IMAGE}}{{else}}ghcr.io/soltihq/ci/golang:{{.go_version}}{{end}}'
+    preconditions:
+      - sh: test -n {{if .GO_IMAGE}}{{.GO_IMAGE | shellQuote}}{{else}}{{.go_version | default "" | shellQuote}}{{end}}
+        msg: Set GO_VERSION or GO_IMAGE, or add a go directive to go.mod.
+    cmds:
+      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
+      - task: docker:run
+        vars:
+          IMAGE:     '{{.image}}'
+          CMD:       '{{.CMD}}'
+          MOUNT_DIR: .
+
+          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
+          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
+          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
+          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
+          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+
+          VOLUMES:
+            - '{{.project_root}}/{{.cache_dir}}:/tmp/go-cache:rw'
+
+          ENVS:
+            - HOME=/tmp
+            - GOPATH=/tmp/go-cache/gopath
+            - GOCACHE=/tmp/go-cache/build
+            - GOMODCACHE=/tmp/go-cache/mod
+
+  # Check tracked Go files for gofumpt formatting differences.
+  gofumpt:
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: |
+            sh -c '
+              bad=$(git ls-files "*.go" | grep -v "^vendor/" | xargs -r gofumpt -l)
+
+              if [ -n "$bad" ]; then
+                printf "gofumpt: unformatted files:\n%s\n" "$bad" >&2
+                exit 1
+              fi
+            '
+
+  # Format tracked Go files with gofumpt.
+  fmt:
+    desc: Apply gofumpt in the configured container.
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: |
+            sh -c 'git ls-files "*.go" | grep -v "^vendor/" | xargs -r gofumpt -l -w'
+
+  # Run golangci-lint with the configured arguments.
+  golangci:
+    vars:
+      lint_args: '{{.LINT_ARGS | default "./..."}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: 'golangci-lint run {{.lint_args}}'
+
+  # Build a named Go binary for the configured target platform.
+  build:
+    requires:
+      vars: [NAME]
+    vars:
+      build_args:  '{{.BUILD_ARGS  | default "-trimpath -ldflags=\"-s -w\""}}'
+      main_pkg:    '{{.MAIN_PKG    | default "./cmd"}}'
+      output_dir:  '{{.OUTPUT_DIR  | default "bin"}}'
+      go_os:       '{{.GOOS        | default "linux"}}'
+      go_arch:     '{{.GOARCH      | default "amd64"}}'
+      cgo_enabled: '{{.CGO_ENABLED | default "0"}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: |
+            sh -c '
+              mkdir -p "$1"
+              shift
+              exec env "$@"
+            ' go-build \
+              {{.output_dir | shellQuote}} \
+              {{printf "CGO_ENABLED=%s" .cgo_enabled | shellQuote}} \
+              {{printf "GOOS=%s" .go_os | shellQuote}} \
+              {{printf "GOARCH=%s" .go_arch | shellQuote}} \
+              go build {{.build_args}} \
+              -o {{printf "%s/%s-%s-%s" .output_dir .NAME .go_os .go_arch | shellQuote}} \
+              {{.main_pkg | shellQuote}}
+
+  # Scan Go packages for known vulnerabilities.
+  govulncheck:
+    vars:
+      vuln_args: '{{.VULN_ARGS | default "./..."}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: 'govulncheck {{.vuln_args}}'
+
+  # Run Go tests with the configured arguments.
+  test:
+    vars:
+      test_args: '{{.TEST_ARGS | default "./..."}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: 'go test {{.test_args}}'
+
+  # Update go.mod and go.sum with go mod tidy.
+  tidy:
+    desc: Run go mod tidy.
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: go mod tidy
+
+  # Run go mod vendor.
+  vendor:
+    desc: Run go mod vendor.
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: go mod vendor

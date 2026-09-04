@@ -1,0 +1,199 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+vars:
+  project_root:
+    sh: git rev-parse --show-toplevel
+
+  cache_dir: '{{.RUST_CACHE_DIR | default ".cache/rust"}}'
+
+tasks:
+  # Run a Cargo command in the container.
+  _cargo/tool:
+    requires:
+      vars: [CMD]
+    vars:
+      rust_version:
+        sh: |
+          manifest_path={{printf "%s/Cargo.toml" .project_root | shellQuote}}
+
+          if [ -n {{.RUST_VERSION | default "" | shellQuote}} ]; then
+            printf '%s\n' {{.RUST_VERSION | default "" | shellQuote}}
+          elif [ -z {{.RUST_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
+            sed -nE "s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" \
+              "$manifest_path" | head -n 1
+          fi
+
+      image: '{{if .RUST_IMAGE}}{{.RUST_IMAGE}}{{else}}ghcr.io/soltihq/ci/rust:{{.rust_version}}{{end}}'
+
+      rust_flags:    '{{.RUSTFLAGS    | default "-D warnings"}}'
+      rustdoc_flags: '{{.RUSTDOCFLAGS | default ""}}'
+    preconditions:
+      - sh: test -n {{if .RUST_IMAGE}}{{.RUST_IMAGE | shellQuote}}{{else}}{{.rust_version | default "" | shellQuote}}{{end}}
+        msg: Set RUST_VERSION or RUST_IMAGE, or add rust-version to Cargo.toml.
+    cmds:
+      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
+      - task: docker:run
+        vars:
+          IMAGE:     '{{.image}}'
+          CMD:       '{{.CMD}}'
+          MOUNT_DIR: .
+
+          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
+          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
+          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
+          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
+          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+
+          VOLUMES:
+            - '{{.project_root}}/{{.cache_dir}}:/tmp/rust-cache:rw'
+
+          ENVS:
+            - CARGO_TARGET_DIR=/tmp/rust-cache/target
+            - CARGO_HOME=/tmp/rust-cache/cargo
+            - RUSTUP_NO_UPDATE_CHECK=1
+            - CARGO_INCREMENTAL=0
+            - RUSTFLAGS={{.rust_flags}}
+            - '{{if .rust_version}}RUSTUP_TOOLCHAIN={{.rust_version}}{{end}}'
+            - '{{if .rustdoc_flags}}RUSTDOCFLAGS={{.rustdoc_flags}}{{end}}'
+
+  # Check Rust formatting.
+  fmt:
+    vars:
+      fmt_args: '{{.FMT_ARGS | default "--check --verbose"}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo fmt {{.fmt_args}}'
+
+  # Type-check the Rust project.
+  check:
+    vars:
+      check_args: '{{.CHECK_ARGS | default ""}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo check {{.check_args}}'
+
+  # Build the selected Rust package with cargo build.
+  build:
+    requires:
+      vars: [CRATE]
+    vars:
+      build_args: '{{.BUILD_ARGS | default ""}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo build -p {{.CRATE | shellQuote}} {{.build_args}}'
+
+  # Lint Rust targets with cargo clippy.
+  clippy:
+    vars:
+      clippy_args: '{{.CLIPPY_ARGS | default "--workspace --all-features -- -D warnings"}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo clippy {{.clippy_args}}'
+
+  # Run Rust tests with cargo test.
+  test:
+    vars:
+      test_args: '{{.TEST_ARGS | default "--workspace --all-features"}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo test {{.test_args}}'
+
+  # Run Rust benchmarks with cargo bench.
+  bench:
+    vars:
+      bench_args: '{{.BENCH_ARGS | default ""}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo bench {{.bench_args}}'
+
+  # Scan Rust dependencies.
+  audit:
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: cargo audit
+
+  # Validate publishing the selected crate without uploading it.
+  publish/dry-run:
+    requires:
+      vars: [CRATE]
+    vars:
+      publish_args: '{{.PUBLISH_ARGS | default "--all-features"}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo publish --dry-run -p {{.CRATE | shellQuote}} {{.publish_args}}'
+
+  # List files included in the selected crate package.
+  package/list:
+    requires:
+      vars: [CRATE]
+    vars:
+      package_args: '{{.PACKAGE_ARGS | default "--locked"}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo package --list -p {{.CRATE | shellQuote}} {{.package_args}}'
+
+  # Build Rust API documentation while denying rustdoc warnings.
+  doc/build:
+    vars:
+      doc_args: '{{.DOC_ARGS | default ""}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          RUSTDOCFLAGS: -D warnings
+          CMD:          'cargo doc {{.doc_args}}'
+
+  # Build Rust API docs.
+  doc/build-nightly:
+    vars:
+      manifest_path: '{{if .MANIFEST_PATH}}{{.MANIFEST_PATH}}{{else if .CRATE}}crates/{{.CRATE}}/Cargo.toml{{else}}Cargo.toml{{end}}'
+      docs_args:     '{{.DOCS_ARGS | default "--all-features"}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          RUSTFLAGS: --cap-lints warn
+          CMD: >-
+            cargo +nightly rustdoc
+            --lib
+            --manifest-path {{.manifest_path | shellQuote}}
+            {{.docs_args}}
+            -Zrustdoc-map
+            -Zunstable-options
+            -Zrustdoc-scrape-examples
+            --config 'build.rustdocflags=["--cfg","docsrs","-Z","unstable-options","--cap-lints","warn"]'
+
+  # Format Rust source.
+  fmt/fix:
+    desc: Run cargo fmt in the configured container.
+    vars:
+      fmt_args: '{{.FMT_ARGS | default ""}}'
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: 'cargo fmt {{.fmt_args}}'
+
+  # Apply cargo audit fixes to vulnerable dependencies.
+  audit/fix:
+    desc: Run cargo audit fix.
+    cmds:
+      - task: _cargo/tool
+        vars:
+          CMD: cargo audit fix

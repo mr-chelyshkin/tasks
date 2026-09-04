@@ -1,0 +1,105 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+vars:
+  project_root:
+    sh: git rev-parse --show-toplevel
+
+  image: '{{if .TERRAFORM_IMAGE}}{{.TERRAFORM_IMAGE}}{{else}}ghcr.io/soltihq/ci/terraform:{{.terraform_version}}{{end}}'
+
+  terraform_dir:     '{{.TERRAFORM_DIR       | default "tf"}}'
+  terraform_version: '{{.TERRAFORM_VERSION   | default "1.15.8"}}'
+  cache_dir:         '{{.TERRAFORM_CACHE_DIR | default ".cache/terraform"}}'
+
+tasks:
+  # Run a Terraform command in the configured container.
+  _terraform/tool:
+    requires:
+      vars: [CMD]
+    cmds:
+      - mkdir -p {{printf "%s/%s/plugins" .project_root .cache_dir | shellQuote}}
+      - task: docker:run
+        vars:
+          IMAGE:     '{{.image}}'
+          CMD:       '{{.CMD}}'
+          MOUNT_DIR: .
+
+          WORKDIR: '/workspace/{{.terraform_dir}}'
+
+          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
+          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
+          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
+          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
+          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+
+          VOLUMES:
+            - '{{.project_root}}/{{.cache_dir}}:/tmp/terraform-cache:rw'
+
+          ENVS:
+            - HOME=/tmp
+            - CHECKPOINT_DISABLE=1
+            - TF_IN_AUTOMATION=1
+            - TF_PLUGIN_CACHE_DIR=/tmp/terraform-cache/plugins
+
+  # Initialize Terraform.
+  _terraform/init:
+    vars:
+      init_args: '{{.INIT_ARGS | default "-input=false -lockfile=readonly"}}'
+    cmds:
+      - task: _terraform/tool
+        vars:
+          CMD: 'terraform init {{.init_args}}'
+
+  # Check Terraform formatting.
+  fmt:
+    vars:
+      fmt_args: '{{.FMT_ARGS | default "-check -recursive -diff"}}'
+    cmds:
+      - task: _terraform/tool
+        vars:
+          CMD: 'terraform fmt {{.fmt_args}}'
+
+  # Initialize without a backend and validate the Terraform configuration.
+  validate:
+    vars:
+      init_args:     '{{.INIT_ARGS     | default "-backend=false -input=false -lockfile=readonly"}}'
+      validate_args: '{{.VALIDATE_ARGS | default "-no-color"}}'
+    cmds:
+      - task: _terraform/tool
+        vars:
+          CMD: 'terraform init {{.init_args}}'
+      - task: _terraform/tool
+        vars:
+          CMD: 'terraform validate {{.validate_args}}'
+
+  # Initialize and apply the Terraform configuration.
+  apply:
+    vars:
+      init_args:  '{{.INIT_ARGS  | default "-input=false -lockfile=readonly"}}'
+      apply_args: '{{.APPLY_ARGS | default "-auto-approve -input=false -lock-timeout=5m -no-color"}}'
+    cmds:
+      - task: _terraform/init
+        vars:
+          INIT_ARGS: '{{.init_args}}'
+      - task: _terraform/tool
+        vars:
+          CMD: 'terraform apply {{.apply_args}}'
+
+  # Apply Terraform formatting.
+  fmt/fix:
+    desc: Format Terraform files.
+    vars:
+      fmt_args: '{{.FMT_ARGS | default "-recursive"}}'
+    cmds:
+      - task: _terraform/tool
+        vars:
+          CMD: 'terraform fmt {{.fmt_args}}'

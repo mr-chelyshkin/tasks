@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+vars:
+  project_root:
+    sh: git rev-parse --show-toplevel
+
+  image: '{{if .NODE_IMAGE}}{{.NODE_IMAGE}}{{else}}ghcr.io/soltihq/ci/node:{{.node_version}}{{end}}'
+
+  app_dir:      '{{.APP_DIR        | default "app"}}'
+  cache_dir:    '{{.NODE_CACHE_DIR | default ".cache/node"}}'
+  node_version: '{{.NODE_VERSION   | default "22.23.1"}}'
+
+tasks:
+  # Run npm command in container.
+  _npm/tool:
+    requires:
+      vars: [CMD]
+    cmds:
+      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
+      - task: docker:run
+        vars:
+          IMAGE:     '{{.image}}'
+          CMD:       '{{.CMD}}'
+          WORKDIR:   '/workspace/{{.app_dir}}'
+          MOUNT_DIR: .
+
+          CONTAINER_ENGINE: '{{.CONTAINER_ENGINE      | default "docker"}}'
+          PULL_POLICY:      '{{.CONTAINER_PULL_POLICY | default "missing"}}'
+          CONTAINER_USER:   '{{.CONTAINER_USER        | default "host"}}'
+          MOUNT_MODE:       '{{.CONTAINER_MOUNT_MODE  | default "rw"}}'
+          RUN_ARGS:         '{{.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.CONTAINER_VOLUMES     | default ""}}'
+
+          VOLUMES:
+            - '{{.project_root}}/{{.cache_dir}}:/tmp/npm-cache:rw'
+
+          ENVS:
+            - HOME=/tmp
+            - NPM_CONFIG_CACHE=/tmp/npm-cache
+            - NPM_CONFIG_UPDATE_NOTIFIER=false
+
+  # Run npm script.
+  run:
+    requires:
+      vars: [SCRIPT]
+    cmds:
+      - task: _npm/tool
+        vars:
+          CMD: |
+            sh -c '
+              npm ci && exec npm run "$1"
+            ' npm {{.SCRIPT | shellQuote}}
+
+  # Run npm audit.
+  audit:
+    vars:
+      audit_level: '{{.AUDIT_LEVEL | default "high"}}'
+    cmds:
+      - task: _npm/tool
+        vars:
+          CMD: |
+            sh -c '
+              npm ci && exec npm audit --audit-level "$1"
+            ' npm {{.audit_level | shellQuote}}
