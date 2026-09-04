@@ -72,7 +72,7 @@ tasks:
         vars:
           CMD: |
             sh -c '
-              bad=$(git ls-files "*.go" | grep -v "^vendor/" | xargs -r gofumpt -l)
+              bad=$(git ls-files -z -- "*.go" ":(exclude)vendor/**" | xargs -0 -r gofumpt -l)
 
               if [ -n "$bad" ]; then
                 printf "gofumpt: unformatted files:\n%s\n" "$bad" >&2
@@ -90,7 +90,7 @@ tasks:
       - task: _go/tool
         vars:
           CMD: |
-            sh -c 'git ls-files "*.go" | grep -v "^vendor/" | xargs -r gofumpt -l -w'
+            sh -c 'git ls-files -z -- "*.go" ":(exclude)vendor/**" | xargs -0 -r gofumpt -l -w'
 
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
