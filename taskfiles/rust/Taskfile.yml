@@ -20,9 +20,10 @@ tasks:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      project_root: '{{.context.PROJECT_ROOT   | default .git_root}}'
-      cache_dir:    '{{.context.RUST_CACHE_DIR | default ".cache/rust"}}'
+      configured_root: '{{.context.PROJECT_ROOT   | default .git_root}}'
+      cache_dir:       '{{.context.RUST_CACHE_DIR | default ".cache/rust"}}'
 
+      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
       rust_version:
         sh: |
           manifest_path={{printf "%s/Cargo.toml" .project_root | shellQuote}}
@@ -33,7 +34,6 @@ tasks:
             sed -nE "s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" \
               "$manifest_path" | head -n 1
           fi
-
       image: '{{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE}}{{else}}ghcr.io/soltihq/ci/rust:{{.rust_version}}{{end}}'
 
       rust_flags:    '{{.RUSTFLAGS    | default .context.RUSTFLAGS    | default "-D warnings"}}'

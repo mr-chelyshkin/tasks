@@ -20,9 +20,10 @@ tasks:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      project_root: '{{.context.PROJECT_ROOT | default .git_root}}'
-      cache_dir:    '{{.context.GO_CACHE_DIR | default ".cache/go"}}'
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      cache_dir:       '{{.context.GO_CACHE_DIR | default ".cache/go"}}'
 
+      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
       go_version:
         sh: |
           manifest_path={{printf "%s/go.mod" .project_root | shellQuote}}
@@ -32,8 +33,7 @@ tasks:
           elif [ -z {{.context.GO_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
             sed -nE 's/^go[[:space:]]+([^[:space:]]+).*/\1/p' "$manifest_path" | head -n 1
           fi
-
-      image: '{{if .context.GO_IMAGE}}{{.context.GO_IMAGE}}{{else}}ghcr.io/soltihq/ci/golang:{{.go_version}}{{end}}'
+      image: '{{if .context.GO_IMAGE}}{{.context.GO_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/golang:{{.go_version}}{{end}}'
     preconditions:
       - sh: test -n {{if .context.GO_IMAGE}}{{.context.GO_IMAGE | shellQuote}}{{else}}{{.go_version | default "" | shellQuote}}{{end}}
         msg: Set GO_VERSION or GO_IMAGE, or add a go directive to go.mod.

@@ -20,12 +20,13 @@ tasks:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      project_root: '{{.context.PROJECT_ROOT   | default .git_root}}'
-      node_version: '{{.context.NODE_VERSION   | default "22.23.1"}}'
-      app_dir:      '{{.context.APP_DIR        | default "app"}}'
-      cache_dir:    '{{.context.NODE_CACHE_DIR | default ".cache/node"}}'
+      configured_root: '{{.context.PROJECT_ROOT   | default .git_root}}'
+      node_version:    '{{.context.NODE_VERSION   | default "22.23.1"}}'
+      app_dir:         '{{.context.APP_DIR        | default "app"}}'
+      cache_dir:       '{{.context.NODE_CACHE_DIR | default ".cache/node"}}'
 
-      image: '{{if .context.NODE_IMAGE}}{{.context.NODE_IMAGE}}{{else}}ghcr.io/soltihq/ci/node:{{.node_version}}{{end}}'
+      image:        '{{if .context.NODE_IMAGE}}{{.context.NODE_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/node:{{.node_version}}{{end}}'
+      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
     cmds:
       - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
       - task: docker:run

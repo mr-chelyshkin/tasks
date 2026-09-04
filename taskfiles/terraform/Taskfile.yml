@@ -20,12 +20,13 @@ tasks:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      project_root:      '{{.context.PROJECT_ROOT        | default .git_root}}'
+      configured_root:   '{{.context.PROJECT_ROOT        | default .git_root}}'
       terraform_dir:     '{{.context.TERRAFORM_DIR       | default "tf"}}'
       terraform_version: '{{.context.TERRAFORM_VERSION   | default "1.15.8"}}'
       cache_dir:         '{{.context.TERRAFORM_CACHE_DIR | default ".cache/terraform"}}'
 
-      image: '{{if .context.TERRAFORM_IMAGE}}{{.context.TERRAFORM_IMAGE}}{{else}}ghcr.io/soltihq/ci/terraform:{{.terraform_version}}{{end}}'
+      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      image:        '{{if .context.TERRAFORM_IMAGE}}{{.context.TERRAFORM_IMAGE}}{{else}}ghcr.io/soltihq/ci/terraform:{{.terraform_version}}{{end}}'
     preconditions:
       - sh: test -d {{.project_root | shellQuote}}
         msg: 'PROJECT_ROOT does not exist or is not a directory: {{.project_root}}'

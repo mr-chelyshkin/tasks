@@ -12,7 +12,8 @@ tasks:
     requires:
       vars: [IMAGE, CMD, MOUNT_DIR]
     vars:
-      project_root: '{{if .PROJECT_ROOT}}{{.PROJECT_ROOT}}{{else}}{{.git_root}}{{end}}'
+      configured_root: '{{if .PROJECT_ROOT}}{{.PROJECT_ROOT}}{{else}}{{.git_root}}{{end}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
 
       engine:        '{{.CONTAINER_ENGINE | default "docker"}}'
       pull_policy:   '{{.PULL_POLICY      | default "missing"}}'
