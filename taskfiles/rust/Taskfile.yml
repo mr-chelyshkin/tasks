@@ -8,7 +8,7 @@ includes:
     internal: true
 
 vars:
-  project_root:
+  git_root:
     sh: git rev-parse --show-toplevel
 
 tasks:
@@ -20,7 +20,8 @@ tasks:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      cache_dir: '{{.context.RUST_CACHE_DIR | default ".cache/rust"}}'
+      project_root: '{{.context.PROJECT_ROOT   | default .git_root}}'
+      cache_dir:    '{{.context.RUST_CACHE_DIR | default ".cache/rust"}}'
 
       rust_version:
         sh: |
@@ -46,6 +47,7 @@ tasks:
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.project_root}}'
           MOUNT_DIR:    .
           MOUNT_TARGET: /workspace
 

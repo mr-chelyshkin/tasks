@@ -8,7 +8,7 @@ includes:
     internal: true
 
 vars:
-  project_root:
+  git_root:
     sh: git rev-parse --show-toplevel
 
 tasks:
@@ -20,6 +20,7 @@ tasks:
       context:
         ref: '.TASK_CONTEXT | default .'
 
+      project_root:      '{{.context.PROJECT_ROOT        | default .git_root}}'
       terraform_dir:     '{{.context.TERRAFORM_DIR       | default "tf"}}'
       terraform_version: '{{.context.TERRAFORM_VERSION   | default "1.15.8"}}'
       cache_dir:         '{{.context.TERRAFORM_CACHE_DIR | default ".cache/terraform"}}'
@@ -31,6 +32,7 @@ tasks:
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.project_root}}'
           MOUNT_DIR:    .
           MOUNT_TARGET: /workspace
 

@@ -17,12 +17,14 @@ tasks:
         ref: '.TASK_CONTEXT | default .'
 
       aws_version: '{{.context.AWS_VERSION | default "2.36.24"}}'
-      image:       '{{if .context.AWS_IMAGE}}{{.context.AWS_IMAGE}}{{else}}ghcr.io/soltihq/ci/aws:{{.aws_version}}{{end}}'
+
+      image: '{{if .context.AWS_IMAGE}}{{.context.AWS_IMAGE}}{{else}}ghcr.io/soltihq/ci/aws:{{.aws_version}}{{end}}'
     cmds:
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
           MOUNT_DIR:    .
           MOUNT_TARGET: /workspace
 

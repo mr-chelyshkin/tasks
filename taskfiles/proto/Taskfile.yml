@@ -17,12 +17,14 @@ tasks:
         ref: '.TASK_CONTEXT | default .'
 
       proto_version: '{{.context.PROTO_VERSION | default "1.50.0"}}'
-      image:         '{{if .context.PROTO_IMAGE}}{{.context.PROTO_IMAGE}}{{else}}ghcr.io/soltihq/ci/proto:{{.proto_version}}{{end}}'
+
+      image: '{{if .context.PROTO_IMAGE}}{{.context.PROTO_IMAGE}}{{else}}ghcr.io/soltihq/ci/proto:{{.proto_version}}{{end}}'
     cmds:
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
           MOUNT_DIR:    .
           MOUNT_TARGET: /workspace
 
