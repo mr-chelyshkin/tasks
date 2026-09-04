@@ -40,9 +40,10 @@ tasks:
       - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
       - task: docker:run
         vars:
-          IMAGE:     '{{.image}}'
-          CMD:       '{{.CMD}}'
-          MOUNT_DIR: .
+          IMAGE:        '{{.image}}'
+          CMD:          '{{.CMD}}'
+          MOUNT_DIR:    .
+          MOUNT_TARGET: /workspace
 
           CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
           PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
