@@ -18,7 +18,7 @@ tasks:
 
       aws_version: '{{.context.AWS_VERSION | default "2.36.24"}}'
 
-      image: '{{if .context.AWS_IMAGE}}{{.context.AWS_IMAGE}}{{else}}ghcr.io/soltihq/ci/aws:{{.aws_version}}{{end}}'
+      image: '{{if .context.AWS_IMAGE}}{{.context.AWS_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/aws:{{.aws_version}}{{end}}'
     cmds:
       - task: docker:run
         vars:
