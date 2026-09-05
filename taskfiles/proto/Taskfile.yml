@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Containerized validation and formatting for Protobuf schemas.
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+tasks:
+  # Run a protobuf tool command in the container.
+  _proto/tool:
+    requires:
+      vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      proto_version: '{{.context.PROTO_VERSION | default "1.50.0"}}'
+
+      image: '{{if .context.PROTO_IMAGE}}{{.context.PROTO_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/proto:{{.proto_version}}{{end}}'
+    cmds:
+      - task: docker:run
+        vars:
+          IMAGE:        '{{.image}}'
+          CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
+          MOUNT_DIR:    .
+          MOUNT_TARGET: /workspace
+
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
+
+          ENVS:
+            - HOME=/tmp
+
+  # Run clang-format on protobuf sources.
+  _proto/clang/format:
+    requires:
+      vars: [FORMAT_ARGS]
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: |
+            bash -e -o pipefail -c '
+              git ls-files -z -- "*.proto" |
+                xargs -0 -r clang-format "$@"
+            ' clang-format {{.FORMAT_ARGS}}
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Lint protobuf sources with Buf.
+  lint:
+    vars:
+      buf_args: '{{.BUF_ARGS | default ""}}'
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: 'buf lint {{.buf_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Build the protobuf schema with Buf.
+  build:
+    vars:
+      buf_args: '{{.BUF_ARGS | default ""}}'
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: 'buf build {{.buf_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Check protobuf formatting (clang-format).
+  format/clang:
+    vars:
+      format_args: '{{.FORMAT_ARGS | default "--dry-run --Werror"}}'
+    cmds:
+      - task: _proto/clang/format
+        vars:
+          FORMAT_ARGS: '{{.format_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Apply clang-format to protobuf sources.
+  format/clang/fix:
+    desc: Apply clang-format in the configured container.
+    vars:
+      format_args: '{{.FORMAT_ARGS | default "-i"}}'
+    cmds:
+      - task: _proto/clang/format
+        vars:
+          FORMAT_ARGS: '{{.format_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Check the protobuf schema for breaking changes against a baseline.
+  breaking:
+    vars:
+      default_branch: '{{.DEFAULT_BRANCH | default "main"}}'
+      against:        '{{.AGAINST | default (printf ".git#branch=%s" .default_branch)}}'
+    cmds:
+      - task: _proto/tool
+        vars:
+          CMD: 'buf breaking --against {{.against | shellQuote}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

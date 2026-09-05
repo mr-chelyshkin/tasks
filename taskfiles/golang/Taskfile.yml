@@ -1,0 +1,186 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Containerized development and CI workflows for Go projects.
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+vars:
+  git_root:
+    sh: git rev-parse --show-toplevel
+
+tasks:
+  # Run an arbitrary Go toolchain command in the configured container.
+  _go/tool:
+    requires:
+      vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      cache_dir:       '{{.context.GO_CACHE_DIR | default ".cache/go"}}'
+
+      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      go_version:
+        sh: |
+          manifest_path={{printf "%s/go.mod" .project_root | shellQuote}}
+
+          if [ -n {{.context.GO_VERSION | default "" | shellQuote}} ]; then
+            printf '%s\n' {{.context.GO_VERSION | default "" | shellQuote}}
+          elif [ -z {{.context.GO_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
+            sed -nE 's/^go[[:space:]]+([^[:space:]]+).*/\1/p' "$manifest_path" | head -n 1
+          fi
+      image: '{{if .context.GO_IMAGE}}{{.context.GO_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/golang:{{.go_version}}{{end}}'
+    preconditions:
+      - sh: test -n {{if .context.GO_IMAGE}}{{.context.GO_IMAGE | shellQuote}}{{else}}{{.go_version | default "" | shellQuote}}{{end}}
+        msg: Set GO_VERSION or GO_IMAGE, or add a go directive to go.mod.
+    cmds:
+      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
+      - task: docker:run
+        vars:
+          IMAGE:        '{{.image}}'
+          CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.project_root}}'
+          MOUNT_DIR:    .
+          MOUNT_TARGET: /workspace
+
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
+
+          VOLUMES:
+            - '{{.project_root}}/{{.cache_dir}}:/tmp/go-cache:rw'
+
+          ENVS:
+            - HOME=/tmp
+            - GOPATH=/tmp/go-cache/gopath
+            - GOCACHE=/tmp/go-cache/build
+            - GOMODCACHE=/tmp/go-cache/mod
+
+  # Check tracked Go files for gofumpt formatting differences.
+  gofumpt:
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: |
+            bash -e -o pipefail -c '
+              bad=$(git ls-files -z -- "*.go" ":(exclude)vendor/**" | xargs -0 -r gofumpt -l)
+
+              if [ -n "$bad" ]; then
+                printf "gofumpt: unformatted files:\n%s\n" "$bad" >&2
+                exit 1
+              fi
+            '
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Format tracked Go files with gofumpt.
+  fmt:
+    desc: Apply gofumpt in the configured container.
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: |
+            bash -e -o pipefail -c 'git ls-files -z -- "*.go" ":(exclude)vendor/**" | xargs -0 -r gofumpt -l -w'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Run golangci-lint with the configured arguments.
+  golangci:
+    vars:
+      lint_args: '{{.LINT_ARGS | default "./..."}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: 'golangci-lint run {{.lint_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Build a named Go binary for the configured target platform.
+  build:
+    requires:
+      vars: [NAME]
+    vars:
+      build_args:  '{{.BUILD_ARGS  | default "-trimpath -ldflags=\"-s -w\""}}'
+      main_pkg:    '{{.MAIN_PKG    | default "./cmd"}}'
+      output_dir:  '{{.OUTPUT_DIR  | default "bin"}}'
+      go_os:       '{{.GOOS        | default "linux"}}'
+      go_arch:     '{{.GOARCH      | default "amd64"}}'
+      cgo_enabled: '{{.CGO_ENABLED | default "0"}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: |
+            sh -c '
+              mkdir -p "$1"
+              shift
+              exec env "$@"
+            ' go-build \
+              {{.output_dir | shellQuote}} \
+              {{printf "CGO_ENABLED=%s" .cgo_enabled | shellQuote}} \
+              {{printf "GOOS=%s" .go_os | shellQuote}} \
+              {{printf "GOARCH=%s" .go_arch | shellQuote}} \
+              go build {{.build_args}} \
+              -o {{printf "%s/%s-%s-%s" .output_dir .NAME .go_os .go_arch | shellQuote}} \
+              {{.main_pkg | shellQuote}}
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Scan Go packages for known vulnerabilities.
+  govulncheck:
+    vars:
+      vuln_args: '{{.VULN_ARGS | default "./..."}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: 'govulncheck {{.vuln_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Run Go tests with the configured arguments.
+  test:
+    vars:
+      test_args: '{{.TEST_ARGS | default "./..."}}'
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: 'go test {{.test_args}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Update go.mod and go.sum with go mod tidy.
+  tidy:
+    desc: Run go mod tidy.
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: go mod tidy
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Run go mod vendor.
+  vendor:
+    desc: Run go mod vendor.
+    cmds:
+      - task: _go/tool
+        vars:
+          CMD: go mod vendor
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

@@ -1,0 +1,173 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Containerized static-site delivery through Amazon S3 and CloudFront.
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+tasks:
+  # Run an AWS CLI command in container.
+  _aws/tool:
+    requires:
+      vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      aws_version: '{{.context.AWS_VERSION | default "2.36.24"}}'
+
+      image: '{{if .context.AWS_IMAGE}}{{.context.AWS_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/aws:{{.aws_version}}{{end}}'
+    cmds:
+      - task: docker:run
+        vars:
+          IMAGE:        '{{.image}}'
+          CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
+          MOUNT_DIR:    .
+          MOUNT_TARGET: /workspace
+
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
+
+          ENVS:
+            - HOME=/tmp
+            - AWS_ACCESS_KEY_ID
+            - AWS_SECRET_ACCESS_KEY
+            - AWS_SESSION_TOKEN
+            - AWS_REGION
+            - AWS_DEFAULT_REGION
+            - '{{if .SOURCE_DIR}}TASKS_SOURCE_DIR={{.SOURCE_DIR}}{{end}}'
+            - '{{if .BUCKET}}TASKS_BUCKET={{.BUCKET}}{{end}}'
+            - '{{if .IMMUTABLE_PATTERNS}}TASKS_IMMUTABLE_PATTERNS={{.IMMUTABLE_PATTERNS}}{{end}}'
+            - '{{if .IMMUTABLE_CACHE_CONTROL}}TASKS_IMMUTABLE_CACHE_CONTROL={{.IMMUTABLE_CACHE_CONTROL}}{{end}}'
+            - '{{if .MUTABLE_CACHE_CONTROL}}TASKS_MUTABLE_CACHE_CONTROL={{.MUTABLE_CACHE_CONTROL}}{{end}}'
+            - '{{if .DISTRIBUTION_ID}}TASKS_DISTRIBUTION_ID={{.DISTRIBUTION_ID}}{{end}}'
+            - '{{if .INVALIDATION_PATHS}}TASKS_INVALIDATION_PATHS={{.INVALIDATION_PATHS}}{{end}}'
+
+  # Upload a static site to S3 with explicit cache policies.
+  s3/upload/static:
+    requires:
+      vars: [SOURCE_DIR, BUCKET]
+    vars:
+      # AWS CLI patterns for content-addressed assets, one pattern per line.
+      immutable_patterns:      '{{.IMMUTABLE_PATTERNS      | default ""}}'
+      immutable_cache_control: '{{.IMMUTABLE_CACHE_CONTROL | default "public,max-age=31536000,immutable"}}'
+      mutable_cache_control:   '{{.MUTABLE_CACHE_CONTROL   | default "no-cache,no-store,must-revalidate"}}'
+    cmds:
+      - task: _aws/tool
+        vars:
+          SOURCE_DIR:              '{{.SOURCE_DIR}}'
+          BUCKET:                  '{{.BUCKET}}'
+          IMMUTABLE_PATTERNS:      '{{.immutable_patterns}}'
+          IMMUTABLE_CACHE_CONTROL: '{{.immutable_cache_control}}'
+          MUTABLE_CACHE_CONTROL:   '{{.mutable_cache_control}}'
+
+          CMD: |
+            bash -c '
+              set -euo pipefail
+
+              source_dir="/workspace/$TASKS_SOURCE_DIR"
+
+              test -d "$source_dir"
+
+              if [ -L "$source_dir/index.html" ]; then
+                printf "index.html must not be a symbolic link\n" >&2
+                exit 1
+              fi
+
+              test -f "$source_dir/index.html"
+
+              immutable_sync_args=(
+                s3 sync
+                "$source_dir"
+                "s3://$TASKS_BUCKET"
+                --no-follow-symlinks
+                --exclude "*"
+              )
+              mutable_sync_args=(
+                s3 sync
+                "$source_dir"
+                "s3://$TASKS_BUCKET"
+                --no-follow-symlinks
+              )
+              immutable_pattern_count=0
+
+              while IFS= read -r pattern; do
+                [ -n "$pattern" ] || continue
+
+                immutable_sync_args+=(--include "$pattern")
+                mutable_sync_args+=(--exclude "$pattern")
+                immutable_pattern_count=$((immutable_pattern_count + 1))
+              done <<< "${TASKS_IMMUTABLE_PATTERNS:-}"
+
+              immutable_sync_args+=(
+                --exclude "index.html"
+                --cache-control "$TASKS_IMMUTABLE_CACHE_CONTROL"
+                --only-show-errors
+              )
+              mutable_sync_args+=(
+                --exclude "index.html"
+                --cache-control "$TASKS_MUTABLE_CACHE_CONTROL"
+                --only-show-errors
+              )
+
+              if ((immutable_pattern_count > 0)); then
+                aws "${immutable_sync_args[@]}"
+              fi
+
+              aws "${mutable_sync_args[@]}"
+
+              exec aws s3 cp \
+                "$source_dir/index.html" \
+                "s3://$TASKS_BUCKET/index.html" \
+                --no-follow-symlinks \
+                --cache-control "$TASKS_MUTABLE_CACHE_CONTROL" \
+                --content-type "text/html; charset=utf-8" \
+                --only-show-errors
+            '
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Create a CloudFront cache invalidation.
+  cloudfront/cache/invalidate:
+    requires:
+      vars: [DISTRIBUTION_ID]
+    vars:
+      invalidation_paths: '{{.INVALIDATION_PATHS | default "/*"}}'
+    cmds:
+      - task: _aws/tool
+        vars:
+          DISTRIBUTION_ID:    '{{.DISTRIBUTION_ID}}'
+          INVALIDATION_PATHS: '{{.invalidation_paths}}'
+
+          CMD: |
+            bash -c '
+              set -euo pipefail
+
+              read -r -a paths <<< "$TASKS_INVALIDATION_PATHS"
+
+              invalidation_id=$(
+                aws cloudfront create-invalidation \
+                  --distribution-id "$TASKS_DISTRIBUTION_ID" \
+                  --paths "${paths[@]}" \
+                  --query Invalidation.Id \
+                  --output text
+              )
+
+              exec aws cloudfront wait invalidation-completed \
+                --distribution-id "$TASKS_DISTRIBUTION_ID" \
+                --id "$invalidation_id"
+            '
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

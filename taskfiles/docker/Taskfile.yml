@@ -1,0 +1,115 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Shared container runner for project tooling.
+version: '3.53.1'
+silent: true
+
+vars:
+  git_root:
+    sh: git rev-parse --show-toplevel
+
+tasks:
+  # Run a command in a container.
+  run:
+    requires:
+      vars: [IMAGE, CMD, MOUNT_DIR]
+    vars:
+      configured_root: '{{if .PROJECT_ROOT}}{{.PROJECT_ROOT}}{{else}}{{.git_root}}{{end}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+
+      engine:        '{{.CONTAINER_ENGINE | default "docker"}}'
+      pull_policy:   '{{.PULL_POLICY      | default "missing"}}'
+      mount_target:  '{{.MOUNT_TARGET     | default "/workspace"}}'
+      mount_mode:    '{{.MOUNT_MODE       | default "rw"}}'
+      workdir:       '{{.WORKDIR          | default .mount_target}}'
+      user:          '{{.CONTAINER_USER   | default "host"}}'
+      run_args:      '{{.RUN_ARGS         | default ""}}'
+      ports:         '{{.PORTS            | default ""}}'
+      extra_envs:    '{{.EXTRA_ENVS       | default ""}}'
+      extra_volumes: '{{.EXTRA_VOLUMES    | default ""}}'
+    cmds:
+      - |
+        set -eu
+
+        project_root=$(cd {{printf "%s" .project_root | shellQuote}} && pwd -P)
+        mount_path=$(cd "$project_root" && cd {{.MOUNT_DIR | shellQuote}} && pwd -P)
+
+        mount_target={{.mount_target | shellQuote}}
+        mount_mode={{.mount_mode | shellQuote}}
+        pull_policy={{.pull_policy | shellQuote}}
+        container_user={{.user | shellQuote}}
+
+        case "$mount_path" in
+          "$project_root"|"$project_root"/*)
+            ;;
+          *)
+            printf 'mount path is outside PROJECT_ROOT: %s\n' "$mount_path" >&2
+            exit 2
+            ;;
+        esac
+
+        case "$mount_mode" in
+          ro|rw)
+            ;;
+          *)
+            printf 'invalid mount mode: %s\n' "$mount_mode" >&2
+            exit 2
+            ;;
+        esac
+
+        case "$pull_policy" in
+          always|missing|never)
+            ;;
+          *)
+            printf 'invalid pull policy: %s\n' "$pull_policy" >&2
+            exit 2
+            ;;
+        esac
+
+        set -- {{.engine | shellQuote}} run "--pull=$pull_policy" \
+          --rm --init \
+          --security-opt no-new-privileges \
+          --cap-drop ALL
+
+        case "$container_user" in
+          host)
+            set -- "$@" --user "$(id -u):$(id -g)"
+            ;;
+          image)
+            ;;
+          *)
+            set -- "$@" --user "$container_user"
+            ;;
+        esac
+
+        set -- "$@" --volume "$mount_path:$mount_target:$mount_mode"
+        {{range .VOLUMES}}
+        {{if .}}
+        set -- "$@" --volume {{. | shellQuote}}
+        {{end}}
+        {{end}}
+        {{range (.extra_volumes | splitArgs)}}
+        set -- "$@" --volume {{. | shellQuote}}
+        {{end}}
+
+        {{range .ENVS}}
+        {{if .}}
+        set -- "$@" --env {{. | shellQuote}}
+        {{end}}
+        {{end}}
+        {{range (.extra_envs | splitArgs)}}
+        set -- "$@" --env {{. | shellQuote}}
+        {{end}}
+
+        {{range (.ports | splitArgs)}}
+        set -- "$@" --publish {{. | shellQuote}}
+        {{end}}
+        {{range (.run_args | splitArgs)}}
+        set -- "$@" {{. | shellQuote}}
+        {{end}}
+
+        set -- "$@" --workdir {{.workdir | shellQuote}} {{.IMAGE | shellQuote}}
+        {{range (.CMD | splitArgs)}}
+        set -- "$@" {{. | shellQuote}}
+        {{end}}
+
+        exec "$@"
