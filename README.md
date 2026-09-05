@@ -8,9 +8,10 @@
        width="800">
 </p>
 
-**Define a project command once. Run it locally and in CI with containerized tools.**
+### Define a project command once. Run it locally and in CI with containerized tools.
 
-Local and CI workflows drift. Different tool versions, flags, and working directories turn one build into two systems to maintain.
+Local and CI workflows drift. 
+Different tool versions, flags, and working directories turn one build into two systems to maintain.
 
 This repository provides reusable [Task](https://taskfile.dev/) modules for running development and delivery tools in containers.
 Include the modules your project needs, choose the tool images, and compose your project commands in a Taskfile.
@@ -36,8 +37,7 @@ includes:
   node:
     taskfile: https://raw.githubusercontent.com/mr-chelyshkin/tasks/main/taskfiles/node/Taskfile.yml
     vars:
-      NODE_IMAGE: docker.io/library/node:22.23.1-bookworm-slim
-      APP_DIR:    .
+      APP_DIR: .
 
 tasks:
   ci/build:
