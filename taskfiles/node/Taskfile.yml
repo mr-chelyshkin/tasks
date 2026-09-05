@@ -1,4 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Containerized npm workflows for Node.js projects.
 version: '3.53.1'
 silent: true
 

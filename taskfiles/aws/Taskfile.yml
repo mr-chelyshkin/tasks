@@ -1,4 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Containerized static-site delivery through Amazon S3 and CloudFront.
 version: '3.53.1'
 silent: true
 

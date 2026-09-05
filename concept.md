@@ -89,6 +89,6 @@ guarantees depend on the selected container runtime and host.
 | Container paths and mount settings       | Host kernel, runtime, and filesystem behavior        |
 | Rules for passing environment and caches | Credential values, network, and cache contents       |
 
-This gives developers a direct way to run the CI command locally. 
+This gives developers a direct way to run the CI command locally.
 
 [Try it in your project →](README.md#quick-start)
