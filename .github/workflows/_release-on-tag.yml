@@ -1,0 +1,45 @@
+name: Release on tag
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: tag-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-tag:
+    name: Verify tag is on main
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag is on main
+        uses: mr-chelyshkin/actions/check-tag-branch@v1
+        with:
+          branch: main
+
+  release:
+    name: release
+    needs: verify-tag
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: false
+          prerelease: false
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
