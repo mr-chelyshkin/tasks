@@ -106,11 +106,11 @@ tasks:
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Initialize and apply the Terraform configuration.
-  apply:
+  # Initialize and create a Terraform execution plan.
+  plan:
     vars:
-      init_args:  '{{.INIT_ARGS  | default "-input=false -lockfile=readonly"}}'
-      apply_args: '{{.APPLY_ARGS | default "-auto-approve -input=false -lock-timeout=5m -no-color"}}'
+      init_args: '{{.INIT_ARGS | default "-input=false -lockfile=readonly"}}'
+      plan_args: '{{.PLAN_ARGS | default "-input=false -lock-timeout=5m -no-color"}}'
     cmds:
       - task: _terraform/init
         vars:
@@ -120,7 +120,7 @@ tasks:
             ref: '.TASK_CONTEXT | default .'
       - task: _terraform/tool
         vars:
-          CMD: 'terraform apply {{.apply_args}}'
+          CMD: 'terraform plan {{.plan_args}}'
 
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

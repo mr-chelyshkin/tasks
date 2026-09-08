@@ -1,6 +1,6 @@
 # Containerized Taskfiles
 
-[![License: Apache-2.0](https://img.shields.io/github/license/mr-chelyshkin/images?label=license)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/github/license/mr-chelyshkin/tasks?label=license)](LICENSE)
 
 <p align="center">
   <img src=".github/assets/readme-header.png"

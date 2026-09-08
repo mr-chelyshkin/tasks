@@ -32,7 +32,7 @@ tasks:
           if [ -n {{.context.RUST_VERSION | default "" | shellQuote}} ]; then
             printf '%s\n' {{.context.RUST_VERSION | default "" | shellQuote}}
           elif [ -z {{.context.RUST_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
-            sed -nE "s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" \
+            sed -nE "s/^[[:space:]]*(rust-version|\"rust-version\"|'rust-version')[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\2/p" \
               "$manifest_path" | head -n 1
           fi
       image: '{{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/rust:{{.rust_version}}{{end}}'

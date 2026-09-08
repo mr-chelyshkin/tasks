@@ -32,7 +32,7 @@ tasks:
           if [ -n {{.context.GO_VERSION | default "" | shellQuote}} ]; then
             printf '%s\n' {{.context.GO_VERSION | default "" | shellQuote}}
           elif [ -z {{.context.GO_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
-            sed -nE 's/^go[[:space:]]+([^[:space:]]+).*/\1/p' "$manifest_path" | head -n 1
+            sed -nE 's/^[[:space:]]*go[[:space:]]+([^[:space:]]+).*/\1/p' "$manifest_path" | head -n 1
           fi
       image: '{{if .context.GO_IMAGE}}{{.context.GO_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/golang:{{.go_version}}{{end}}'
     preconditions:
