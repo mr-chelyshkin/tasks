@@ -74,6 +74,7 @@ Include only the modules your project needs. Follow the links for the exact task
 |-----------------------------------------------|----------------------------------------------------------------------|
 | [Go](taskfiles/golang/Taskfile.yml)           | Containerized development and CI workflows for Go projects.          |
 | [Node.js](taskfiles/node/Taskfile.yml)        | Containerized npm workflows for Node.js projects.                    |
+| [Python](taskfiles/python/Taskfile.yml)       | Containerized uv workflows for Python projects.                      |
 | [Rust](taskfiles/rust/Taskfile.yml)           | Containerized development and CI workflows for Rust projects.        |
 | [Protobuf](taskfiles/proto/Taskfile.yml)      | Containerized validation and formatting for Protobuf schemas.        |
 | [Terraform](taskfiles/terraform/Taskfile.yml) | Containerized workflows for Terraform configurations.                |
