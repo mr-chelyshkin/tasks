@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src=".github/assets/readme-header.png"
-       alt="An engraved crate-packing line with mechanical presses and a conveyor"
+       alt="github.com/mr-chelyshkin/tasks"
        width="800">
 </p>
 
