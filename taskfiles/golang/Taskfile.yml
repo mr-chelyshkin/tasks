@@ -66,32 +66,22 @@ tasks:
             - GOCACHE=/tmp/go-cache/build
             - GOMODCACHE=/tmp/go-cache/mod
 
-  # Check tracked Go files for gofumpt formatting differences.
+  # Check Go source files using gofumpt's directory traversal.
   gofumpt:
+    vars:
+      fmt_args: '{{.FMT_ARGS | default "-l ."}}'
     cmds:
       - task: _go/tool
         vars:
           CMD: |
-            bash -e -o pipefail -c '
-              bad=$(git ls-files --cached --others --exclude-standard --deduplicate -z -- "*.go" ":(exclude)vendor/**" | xargs -0 -r gofumpt -l)
+            sh -e -c '
+              bad=$(gofumpt {{.fmt_args}})
 
               if [ -n "$bad" ]; then
                 printf "gofumpt: unformatted files:\n%s\n" "$bad" >&2
                 exit 1
               fi
             '
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Format tracked Go files with gofumpt.
-  fmt:
-    desc: Apply gofumpt in the configured container.
-    cmds:
-      - task: _go/tool
-        vars:
-          CMD: |
-            bash -e -o pipefail -c 'git ls-files --cached --others --exclude-standard --deduplicate -z -- "*.go" ":(exclude)vendor/**" | xargs -0 -r gofumpt -l -w'
 
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
