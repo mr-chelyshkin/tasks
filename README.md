@@ -73,6 +73,7 @@ Include only the modules your project needs. Follow the links for the exact task
 | Module                                        | Purpose                                                              |
 |-----------------------------------------------|----------------------------------------------------------------------|
 | [Go](taskfiles/golang/Taskfile.yml)           | Containerized development and CI workflows for Go projects.          |
+| [Nix](taskfiles/nix/Taskfile.yml)             | Containerized formatting, linting, and Nix commands.                 |
 | [Node.js](taskfiles/node/Taskfile.yml)        | Containerized npm workflows for Node.js projects.                    |
 | [Python](taskfiles/python/Taskfile.yml)       | Containerized uv workflows for Python projects.                      |
 | [Rust](taskfiles/rust/Taskfile.yml)           | Containerized development and CI workflows for Rust projects.        |
