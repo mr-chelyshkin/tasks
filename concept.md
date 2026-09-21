@@ -1,14 +1,12 @@
 # How Containerized Taskfiles works
 
-Local scripts and CI jobs can describe the same build differently: another tool
-version, a missing flag, a different working directory or different environment.
+Local scripts and CI jobs can describe the same build differently: another tool version, a missing flag, a different working directory or different environment.
 
 **Keep one project command. Share its execution settings. Package its tools in a container.**
 
 ## One task, locally and in CI
 
-Run `task ci/build` on your laptop or CI runner. Both follow the build defined
-in your project's Taskfile:
+Run `task ci/build` on your laptop or CI runner. Both follow the build defined in your project's Taskfile:
 
 ```mermaid
 flowchart LR
@@ -19,9 +17,8 @@ flowchart LR
     Build --> Container["Build in a container"]
 ```
 
-The task defines the image, command, and container settings. Each invocation
-runs in its own container. CI supplies the checkout, credentials, and artifact
-handling.
+The task defines the image, command, and container settings. Each invocation runs in its own container. 
+CI supplies the checkout, credentials, and artifact handling.
 
 ## One module, different projects
 
@@ -36,9 +33,8 @@ flowchart LR
     API["API<br/>task test"] -->|SCRIPT=test| Node
 ```
 
-Each project keeps its command names, scripts, and image settings. The shared
-module handles `npm ci`, script execution, and container setup. Every call runs
-in a separate container with that project's files and configured cache.
+Each project keeps its command names, scripts, and image settings. The shared module handles `npm ci`, script execution, and container setup. 
+Every call runs in a separate container with that project's files and configured cache.
 
 ## Ephemeral runtime, persistent files
 
@@ -53,24 +49,15 @@ flowchart LR
 Each task runs in a disposable container, while project state remains on the
 host:
 
-- **Persistent workspace.** The project is mounted at `/workspace`; source
-  files, generated output, and caches survive the container.
-- **Host ownership.** The process uses the host UID:GID, preventing generated
-  files from becoming root-owned on the developer's machine.
-- **Controlled writes.** The project mount is read-write by default and can be
-  made read-only for tasks that only inspect files.
-- **Explicit access.** Network access can be disabled when unnecessary;
-  environment variables, credentials, ports, and additional volumes are passed
-  deliberately.
-- **Reduced privileges.** The runner drops all Linux capabilities and enables
-  `no-new-privileges`. An init process handles signals and child processes.
-- **Configurable isolation.** A task can use a writable workspace and network
-  when required, or run with read-only files, no network, no forwarded
-  credentials, and additional runtime restrictions.
+- **Persistent workspace.** The project is mounted at `/workspace`; source files, generated output, and caches survive the container.
+- **Host ownership.** Most tasks use the host UID:GID to preserve file ownership. Nix store commands use the image user by default; Nix formatting and linting still use the host UID:GID. `CONTAINER_USER` can override these defaults.
+- **Controlled writes.** The project mount is read-write by default and can be made read-only for tasks that only inspect files.
+- **Explicit access.** Network access can be disabled when unnecessary; environment variables, credentials, ports, and additional volumes are passed deliberately.
+- **Reduced privileges.** The runner drops all Linux capabilities and enables `no-new-privileges`. An init process handles signals and child processes.
+- **Configurable isolation.** A task can use a writable workspace and network when required, or run with read-only files, no network, no forwarded credentials, and additional runtime restrictions.
 
-These settings form a configurable execution boundary. They support ordinary
-build containers as well as stricter, sandboxed tasks. The actual isolation
-guarantees depend on the selected container runtime and host.
+These settings form a configurable execution boundary. They support ordinary build containers as well as stricter, sandboxed tasks. 
+The actual isolation guarantees depend on the selected container runtime and host.
 
 ## Choose versions deliberately
 

@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Containerized formatting, linting, and Nix commands.
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+tasks:
+  # Run a command as the image user to allow writes to the Nix store.
+  _nix/tool:
+    requires:
+      vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      nix_version: '{{.context.NIX_VERSION | default "2.35.2"}}'
+
+      image: '{{if .context.NIX_IMAGE}}{{.context.NIX_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/nix:{{.nix_version}}{{end}}'
+    cmds:
+      - task: docker:run
+        vars:
+          IMAGE:        '{{.image}}'
+          CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
+          MOUNT_DIR:    .
+          MOUNT_TARGET: /workspace
+
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default "image"}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
+
+          ENVS:
+            - HOME=/tmp
+
+  # Check .nix files recursively; an empty FMT_ARGS enables in-place formatting.
+  nixfmt:
+    vars:
+      fmt_args:  '{{if hasKey . "FMT_ARGS"}}{{.FMT_ARGS}}{{else}}--check{{end}}'
+      fmt_paths: '{{.FMT_PATHS | default "."}}'
+    cmds:
+      - task: _nix/tool
+        vars:
+          CMD: 'find {{.fmt_paths}} -type f -name "*.nix" -exec nixfmt {{.fmt_args}} {} +'
+
+          TASK_CONTEXT:
+            ref: 'merge (dict) (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+
+  # Lint Nix files with Statix's directory traversal and configured arguments.
+  statix:
+    vars:
+      statix_args: '{{.STATIX_ARGS | default "."}}'
+    cmds:
+      - task: _nix/tool
+        vars:
+          CMD: 'statix check {{.statix_args}}'
+
+          TASK_CONTEXT:
+            ref: 'merge (dict) (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+
+  # Report unused Nix declarations and fail when any are found.
+  deadnix:
+    vars:
+      deadnix_args: '{{.DEADNIX_ARGS | default "--fail ."}}'
+    cmds:
+      - task: _nix/tool
+        vars:
+          CMD: 'deadnix {{.deadnix_args}}'
+
+          TASK_CONTEXT:
+            ref: 'merge (dict) (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
