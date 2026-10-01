@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+# Containerized Markdown formatting with mdformat and GitHub Flavored Markdown support.
+version: '3.53.1'
+silent: true
+
+includes:
+  docker:
+    taskfile: ../docker/Taskfile.yml
+    internal: true
+
+tasks:
+  _markdown/tool:
+    requires:
+      vars: [CMD]
+    vars:
+      context:
+        ref: '.TASK_CONTEXT | default .'
+
+      markdown_version: '{{.context.MARKDOWN_VERSION | default "1.0.0"}}'
+
+      image: '{{if .context.MARKDOWN_IMAGE}}{{.context.MARKDOWN_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/markdown:{{.markdown_version}}{{end}}'
+    cmds:
+      - task: docker:run
+        vars:
+          IMAGE:        '{{.image}}'
+          CMD:          '{{.CMD}}'
+          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
+          MOUNT_DIR:    .
+          MOUNT_TARGET: /workspace
+
+          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
+          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
+          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
+          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
+          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
+          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
+          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
+
+  # Check Markdown formatting.
+  fmt:
+    desc: Check Markdown formatting in the configured container.
+    vars:
+      fmt_args:  '{{.FMT_ARGS | default ""}}'
+      fmt_paths: '{{.FMT_PATHS | default "."}}'
+    cmds:
+      - task: _markdown/tool
+        vars:
+          CMD: 'mdformat --check {{.fmt_args}} {{.fmt_paths}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  # Apply the same Markdown style in place.
+  fmt/fix:
+    desc: Apply Markdown formatting in the configured container.
+    vars:
+      fmt_args:  '{{.FMT_ARGS | default ""}}'
+      fmt_paths: '{{.FMT_PATHS | default "."}}'
+    cmds:
+      - task: _markdown/tool
+        vars:
+          CMD: 'mdformat {{.fmt_args}} {{.fmt_paths}}'
+
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'

@@ -73,6 +73,7 @@ Include only the modules your project needs. Follow the links for the exact task
 | Module                                        | Purpose                                                              |
 |-----------------------------------------------|----------------------------------------------------------------------|
 | [Go](taskfiles/golang/Taskfile.yml)           | Containerized development and CI workflows for Go projects.          |
+| [Markdown](taskfiles/markdown/Taskfile.yml)   | Containerized Markdown formatting with configurable style.           |
 | [Nix](taskfiles/nix/Taskfile.yml)             | Containerized formatting, linting, and Nix commands.                 |
 | [Node.js](taskfiles/node/Taskfile.yml)        | Containerized npm workflows for Node.js projects.                    |
 | [Python](taskfiles/python/Taskfile.yml)       | Containerized uv workflows for Python projects.                      |
@@ -81,18 +82,6 @@ Include only the modules your project needs. Follow the links for the exact task
 | [Terraform](taskfiles/terraform/Taskfile.yml) | Containerized workflows for Terraform configurations.                |
 | [AWS](taskfiles/aws/Taskfile.yml)             | Containerized static-site delivery through Amazon S3 and CloudFront. |
 | [Docker](taskfiles/docker/Taskfile.yml)       | Shared container runner used by the tool modules.                    |
-
-## Configure and extend
-
-- Set module defaults in `includes.<module>.vars`.
-- Pass call-specific values in the task call's `vars` block.
-
-Both are shown in the [Quick Start](#quick-start). The linked [Taskfiles](#available-modules) are the source of truth for module inputs and behavior. 
-Container execution is defined by [`docker:run`](taskfiles/docker/Taskfile.yml).
-
-For a command without a named task, call the module wrapper with `CMD`, for example [`node:_npm/tool`](taskfiles/node/Taskfile.yml).
-
-Use `task --list-all` to discover callable tasks and `task --dry <task>` to inspect a command.
 
 ## Learn more
 
