@@ -55,6 +55,9 @@ tasks:
             - CHECKPOINT_DISABLE=1
             - TF_IN_AUTOMATION=1
             - TF_PLUGIN_CACHE_DIR=/tmp/terraform-cache
+          ENV_PREFIXES:
+            - TF_VAR_
+            - TF_TOKEN_
           TASK_CONTEXT:
             ref: .context
 
@@ -65,7 +68,7 @@ tasks:
         vars:
           CMD: 'terraform fmt -check -diff {{.FMT_ARGS | default "-recursive"}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   fmt/fix:
     desc: Fix formatting.

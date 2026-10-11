@@ -70,23 +70,23 @@ tasks:
         vars:
           CMD: 'cargo fmt --check {{.FMT_ARGS | default "--all"}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   lint:
     desc: Run linter.
     cmds:
       - task: exec
         vars:
-          CMD: 'cargo clippy {{.LINT_ARGS | default "--workspace --all-features -- -D warnings"}}'
+          CMD: 'cargo clippy {{.LINT_ARGS | default "--workspace --all-features --locked -- -D warnings"}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   test:
     desc: Run tests.
     cmds:
       - task: exec
         vars:
-          CMD: 'cargo test {{.TEST_ARGS | default "--workspace --all-features"}}'
+          CMD: 'cargo test {{.TEST_ARGS | default "--workspace --all-features --locked"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
@@ -97,7 +97,7 @@ tasks:
         vars:
           CMD: 'cargo audit {{.AUDIT_ARGS}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   docs:
     desc: Build documentation.
@@ -105,7 +105,7 @@ tasks:
       - task: exec
         vars:
           RUSTDOCFLAGS: -D warnings
-          CMD:          'cargo doc {{.DOCS_ARGS}}'
+          CMD:          'cargo doc {{.DOCS_ARGS | default "--locked"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
@@ -116,7 +116,7 @@ tasks:
     cmds:
       - task: exec
         vars:
-          CMD: 'cargo build -p {{.CRATE | shellQuote}} {{.BUILD_ARGS}}'
+          CMD: 'cargo build -p {{.CRATE | shellQuote}} {{.BUILD_ARGS | default "--locked"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
@@ -134,7 +134,7 @@ tasks:
     cmds:
       - task: exec
         vars:
-          CMD: 'cargo clippy --fix --allow-dirty --allow-staged {{.LINT_ARGS | default "--workspace --all-features -- -D warnings"}}'
+          CMD: 'cargo clippy --fix --allow-dirty --allow-staged {{.LINT_ARGS | default "--workspace --all-features --locked -- -D warnings"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
@@ -152,7 +152,7 @@ tasks:
     cmds:
       - task: exec
         vars:
-          CMD: 'cargo check {{.CHECK_ARGS}}'
+          CMD: 'cargo check {{.CHECK_ARGS | default "--locked"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
@@ -161,10 +161,11 @@ tasks:
     cmds:
       - task: exec
         vars:
-          CMD: 'cargo bench {{.BENCH_ARGS}}'
+          CMD: 'cargo bench {{.BENCH_ARGS | default "--locked"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
+  # Unpinned on purpose: docs.rs builds with the latest nightly, so this check must too.
   docs/nightly:
     desc: Build documentation as docs.rs does.
     vars:
@@ -203,6 +204,6 @@ tasks:
     cmds:
       - task: exec
         vars:
-          CMD: 'cargo publish --dry-run -p {{.CRATE | shellQuote}} {{.PUBLISH_DRY_RUN_ARGS | default "--all-features"}}'
+          CMD: 'cargo publish --dry-run -p {{.CRATE | shellQuote}} {{.PUBLISH_DRY_RUN_ARGS | default "--all-features --locked"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

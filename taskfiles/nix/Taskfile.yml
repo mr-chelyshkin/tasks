@@ -53,7 +53,7 @@ tasks:
                 xargs -0 -r nixfmt --check "$@"
             ' nixfmt {{.FMT_ARGS}}
           TASK_CONTEXT:
-            ref: 'merge (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+            ref: 'merge (dict "CONTAINER_USER" "host" "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   lint:
     desc: Run linter.
@@ -71,7 +71,7 @@ tasks:
               exit "$status"
             '
           TASK_CONTEXT:
-            ref: 'merge (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+            ref: 'merge (dict "CONTAINER_USER" "host" "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   fmt/fix:
     desc: Fix formatting.

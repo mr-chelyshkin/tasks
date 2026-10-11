@@ -64,12 +64,9 @@ tasks:
     cmds:
       - task: exec
         vars:
-          CMD: |
-            sh -c '
-              npm ci && exec npm audit "$@"
-            ' npm {{.AUDIT_ARGS | default "--audit-level=high"}}
+          CMD: 'npm audit {{.AUDIT_ARGS | default "--audit-level=high"}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   run:
     desc: Run the npm script SCRIPT.
