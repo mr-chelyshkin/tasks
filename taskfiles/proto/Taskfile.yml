@@ -53,7 +53,7 @@ tasks:
                 xargs -0 -r clang-format --dry-run --Werror "$@"
             ' clang-format {{.FMT_ARGS}}
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   lint:
     desc: Run linter.
@@ -62,7 +62,7 @@ tasks:
         vars:
           CMD: 'buf lint {{.LINT_ARGS}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   build:
     desc: Build the schema.
@@ -89,12 +89,20 @@ tasks:
 
   breaking:
     desc: Check for breaking changes.
-    vars:
-      default_branch: '{{.DEFAULT_BRANCH | default "main"}}'
-      against:        '{{.AGAINST | default (printf ".git#branch=%s" .default_branch)}}'
     cmds:
       - task: exec
         vars:
-          CMD: 'buf breaking --against {{.against | shellQuote}} {{.BREAKING_ARGS}}'
+          CMD: |
+            sh -e -c '
+              against=$1
+              branch=$2
+              shift 2
+              if [ -z "$against" ]; then
+                root=$(git rev-parse --show-toplevel)
+                subdir=$(git rev-parse --show-prefix)
+                against="$root/.git#branch=$branch${subdir:+,subdir=${subdir%/}}"
+              fi
+              exec buf breaking --against "$against" "$@"
+            ' buf-breaking {{.AGAINST | default "" | shellQuote}} {{.DEFAULT_BRANCH | default "main" | shellQuote}} {{.BREAKING_ARGS}}
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

@@ -67,7 +67,7 @@ tasks:
         vars:
           CMD: 'uv run --locked ruff format --check {{.FMT_ARGS | default "."}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   lint:
     desc: Run linter.
@@ -76,7 +76,7 @@ tasks:
         vars:
           CMD: 'uv run --locked ruff check {{.LINT_ARGS | default "."}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   test:
     desc: Run tests.
@@ -94,7 +94,7 @@ tasks:
         vars:
           CMD: 'uv audit --locked {{.AUDIT_ARGS}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   typecheck:
     desc: Check types.
@@ -103,7 +103,7 @@ tasks:
         vars:
           CMD: 'uv run --locked mypy {{.TYPECHECK_ARGS}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   build:
     desc: Build sdist and wheel.

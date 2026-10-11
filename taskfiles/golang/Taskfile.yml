@@ -75,7 +75,7 @@ tasks:
               fi
             '
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   lint:
     desc: Run linter.
@@ -84,7 +84,7 @@ tasks:
         vars:
           CMD: 'golangci-lint run {{.LINT_ARGS | default "./..."}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   test:
     desc: Run tests.
@@ -102,7 +102,7 @@ tasks:
         vars:
           CMD: 'govulncheck {{.AUDIT_ARGS | default "./..."}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   build:
     desc: Build binary NAME.

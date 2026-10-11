@@ -48,7 +48,7 @@ tasks:
         vars:
           CMD: 'mdformat --check {{.FMT_ARGS | default "."}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   fmt/fix:
     desc: Fix formatting.

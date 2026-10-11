@@ -89,6 +89,8 @@ Every module follows the same rules, so a project that knows one module knows th
 
 - `<verb>` checks and never changes files; `<verb>/fix` applies the changes with the same tool.
 - Shared verbs: `fmt`, `lint`, `test`, `audit`, `typecheck`, `docs`, `build`. Other tasks keep their tool's vocabulary.
+- `/fix` is reserved for the writing mode; any other suffix names a variant of the task (`docs/nightly`).
+- `fmt`, `lint`, `typecheck` and `audit` mount the project read-only by default; `CONTAINER_MOUNT_MODE=rw` overrides it.
 - `exec` runs any command in the module's container, with the module's mounts, cache and environment.
 
 | Module    | Tasks                                                                                                                      |
@@ -118,6 +120,10 @@ Every module follows the same rules, so a project that knows one module knows th
 
 Area prefixes: `GO`, `RUST`, `PYTHON`, `NODE`, `NIX`, `PROTO`, `TERRAFORM`, `MARKDOWN`, `AWS`.
 An empty value counts as unset.
+
+Terraform and AWS forward the AWS credential variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
+`AWS_REGION`, `AWS_DEFAULT_REGION`); Terraform also forwards every `TF_VAR_*`.
+They are passed by name, so their values never appear on a command line.
 
 ### Image version
 
@@ -180,9 +186,19 @@ To change container options for one call, pass `TASK_CONTEXT`. Later maps win in
 | Mode flags in `*_ARGS`: `-l` (gofumpt), `--check` (cargo fmt, ruff), `-check -diff` (terraform) | Owned by the task; pass only extra arguments                     |
 | `STATIX_ARGS` / `DEADNIX_ARGS` with targets and `--fail`; nixfmt over every `*.nix` file      | Options only; Nix and Protobuf tasks take files from Git, honouring `.gitignore` |
 | Rust version from `rust-version` in `Cargo.toml`                                             | `channel` in `rust-toolchain.toml`, or `RUST_VERSION`               |
+| Rust defaults without `--locked`                                                             | `--locked` in the defaults of `lint`, `test`, `check`, `bench`, `build`, `docs`, `publish/dry-run` |
+| AWS credentials and `TF_VAR_*` listed in `CONTAINER_ENVS` for Terraform                      | Forwarded by the module                                             |
+| `proto:breaking` default baseline only at the repository root                                | Works in any `PROTO_DIR`                                            |
+| Check tasks mount the project read-write                                                     | `fmt`, `lint`, `typecheck`, `audit` mount it read-only by default   |
+| `node:audit` runs `npm ci` first                                                              | Audits `package-lock.json` without installing                       |
 
 ## Learn more
 
 - [Concept and design boundaries](concept.md)
 - [Taskfile composition and variables](https://taskfile.dev/docs/guide)
 - [Taskfile schema versions](https://taskfile.dev/docs/taskfile-versions)
+
+## Related repositories
+
+- [Reusable GitHub Actions](https://github.com/mr-chelyshkin/actions)
+- [Container images](https://github.com/mr-chelyshkin/images)

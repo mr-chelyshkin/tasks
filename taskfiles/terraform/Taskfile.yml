@@ -55,6 +55,13 @@ tasks:
             - CHECKPOINT_DISABLE=1
             - TF_IN_AUTOMATION=1
             - TF_PLUGIN_CACHE_DIR=/tmp/terraform-cache
+            - AWS_ACCESS_KEY_ID
+            - AWS_SECRET_ACCESS_KEY
+            - AWS_SESSION_TOKEN
+            - AWS_REGION
+            - AWS_DEFAULT_REGION
+          ENV_PREFIXES:
+            - TF_VAR_
           TASK_CONTEXT:
             ref: .context
 
@@ -65,7 +72,7 @@ tasks:
         vars:
           CMD: 'terraform fmt -check -diff {{.FMT_ARGS | default "-recursive"}}'
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
 
   fmt/fix:
     desc: Fix formatting.
