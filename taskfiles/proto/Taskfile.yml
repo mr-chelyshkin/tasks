@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized validation and formatting for Protobuf schemas.
+# Protobuf schemas: formatting, linting, builds and breaking-change checks in the Protobuf container.
 version: '3.53.1'
 silent: true
 
@@ -8,113 +8,93 @@ includes:
     taskfile: ../docker/Taskfile.yml
     internal: true
 
+vars:
+  git_root:
+    sh: git rev-parse --show-toplevel
+
 tasks:
-  # Run a protobuf tool command in the container.
-  _proto/tool:
+  exec:
+    desc: Run CMD in the Protobuf container.
     requires:
       vars: [CMD]
     vars:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      proto_version: '{{.context.PROTO_VERSION | default "1.50.0"}}'
-
-      image: '{{if .context.PROTO_IMAGE}}{{.context.PROTO_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/proto:{{.proto_version}}{{end}}'
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.PROTO_DIR | default "."}}'
+      version:         '{{.context.PROTO_VERSION | default "1.50.0"}}'
+      image:           '{{.context.PROTO_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/proto:%s" .version)}}'
+    preconditions:
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, PROTO_DIR).'
+      - sh: test -n {{.context.PROTO_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set PROTO_VERSION (X.Y.Z) or PROTO_IMAGE.
     cmds:
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
-          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
+          PROJECT_ROOT: '{{.project_root}}'
+          WORKDIR:      '{{.dir}}'
+          TASK_CONTEXT:
+            ref: .context
 
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-          ENVS:
-            - HOME=/tmp
-
-  # Run clang-format on protobuf sources.
-  _proto/clang/format:
-    requires:
-      vars: [FORMAT_ARGS]
+  fmt:
+    desc: Check formatting.
     cmds:
-      - task: _proto/tool
+      - task: exec
         vars:
           CMD: |
-            bash -e -o pipefail -c '
-              git ls-files -z -- "*.proto" |
-                xargs -0 -r clang-format "$@"
-            ' clang-format {{.FORMAT_ARGS}}
-
+            sh -e -c '
+              git rev-parse --is-inside-work-tree > /dev/null
+              git ls-files -z --cached --others --exclude-standard -- "*.proto" |
+                xargs -0 -r clang-format --dry-run --Werror "$@"
+            ' clang-format {{.FMT_ARGS}}
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Lint protobuf sources with Buf.
   lint:
-    vars:
-      buf_args: '{{.BUF_ARGS | default ""}}'
+    desc: Run linter.
     cmds:
-      - task: _proto/tool
+      - task: exec
         vars:
-          CMD: 'buf lint {{.buf_args}}'
-
+          CMD: 'buf lint {{.LINT_ARGS}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Build the protobuf schema with Buf.
   build:
-    vars:
-      buf_args: '{{.BUF_ARGS | default ""}}'
+    desc: Build the schema.
     cmds:
-      - task: _proto/tool
+      - task: exec
         vars:
-          CMD: 'buf build {{.buf_args}}'
-
+          CMD: 'buf build {{.BUILD_ARGS}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Check protobuf formatting (clang-format).
-  format/clang:
-    vars:
-      format_args: '{{.FORMAT_ARGS | default "--dry-run --Werror"}}'
+  fmt/fix:
+    desc: Fix formatting.
     cmds:
-      - task: _proto/clang/format
+      - task: exec
         vars:
-          FORMAT_ARGS: '{{.format_args}}'
-
+          CMD: |
+            sh -e -c '
+              git rev-parse --is-inside-work-tree > /dev/null
+              git ls-files -z --cached --others --exclude-standard -- "*.proto" |
+                xargs -0 -r clang-format -i "$@"
+            ' clang-format {{.FMT_ARGS}}
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Apply clang-format to protobuf sources.
-  format/clang/fix:
-    desc: Apply clang-format in the configured container.
-    vars:
-      format_args: '{{.FORMAT_ARGS | default "-i"}}'
-    cmds:
-      - task: _proto/clang/format
-        vars:
-          FORMAT_ARGS: '{{.format_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Check the protobuf schema for breaking changes against a baseline.
   breaking:
+    desc: Check for breaking changes.
     vars:
       default_branch: '{{.DEFAULT_BRANCH | default "main"}}'
       against:        '{{.AGAINST | default (printf ".git#branch=%s" .default_branch)}}'
     cmds:
-      - task: _proto/tool
+      - task: exec
         vars:
-          CMD: 'buf breaking --against {{.against | shellQuote}}'
-
+          CMD: 'buf breaking --against {{.against | shellQuote}} {{.BREAKING_ARGS}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

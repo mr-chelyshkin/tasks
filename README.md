@@ -36,8 +36,6 @@ version: '3.53.1'
 includes:
   node:
     taskfile: https://raw.githubusercontent.com/mr-chelyshkin/tasks/main/taskfiles/node/Taskfile.yml
-    vars:
-      APP_DIR: .
 
 tasks:
   ci/build:
@@ -82,6 +80,106 @@ Include only the modules your project needs. Follow the links for the exact task
 | [Terraform](taskfiles/terraform/Taskfile.yml) | Containerized workflows for Terraform configurations.                |
 | [AWS](taskfiles/aws/Taskfile.yml)             | Containerized static-site delivery through Amazon S3 and CloudFront. |
 | [Docker](taskfiles/docker/Taskfile.yml)       | Shared container runner used by the tool modules.                    |
+
+## Module contract
+
+Every module follows the same rules, so a project that knows one module knows them all.
+
+### Tasks
+
+- `<verb>` checks and never changes files; `<verb>/fix` applies the changes with the same tool.
+- Shared verbs: `fmt`, `lint`, `test`, `audit`, `typecheck`, `docs`, `build`. Other tasks keep their tool's vocabulary.
+- `exec` runs any command in the module's container, with the module's mounts, cache and environment.
+
+| Module    | Tasks                                                                                                                      |
+|-----------|----------------------------------------------------------------------------------------------------------------------------|
+| Go        | `exec` `fmt` `fmt/fix` `lint` `lint/fix` `test` `audit` `build` `tidy` `vendor`                                            |
+| Rust      | `exec` `fmt` `fmt/fix` `lint` `lint/fix` `test` `audit` `audit/fix` `docs` `build` `check` `bench` `docs/nightly` `package/list` `publish/dry-run` |
+| Python    | `exec` `fmt` `fmt/fix` `lint` `lint/fix` `test` `audit` `typecheck` `build` `package/check` `tag/check`                    |
+| Node.js   | `exec` `audit` `run`                                                                                                       |
+| Nix       | `exec` `fmt` `fmt/fix` `lint` `lint/fix`                                                                                   |
+| Protobuf  | `exec` `fmt` `fmt/fix` `lint` `build` `breaking`                                                                           |
+| Terraform | `exec` `fmt` `fmt/fix` `validate` `plan`                                                                                   |
+| Markdown  | `exec` `fmt` `fmt/fix`                                                                                                     |
+| AWS       | `exec` `s3/upload/static` `cloudfront/cache/invalidate`                                                                    |
+
+`task --list` shows every task with its description.
+
+### Variables
+
+| Variable                         | Meaning                                                                                                                           |
+|----------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `<TASK>_ARGS`                    | Arguments appended after the mode flags the task owns. Named after the task: `FMT_ARGS`, `DOCS_NIGHTLY_ARGS`. `<verb>/fix` reads the variable of `<verb>`; a task that runs several tools reads `<TOOL>_ARGS` (`STATIX_ARGS`, `DEADNIX_ARGS`). |
+| `<AREA>_DIR`                     | Working directory, relative to `PROJECT_ROOT`. Default: `.`.                                                                      |
+| `<AREA>_VERSION`, `<AREA>_IMAGE` | Tool image, see [Image version](#image-version).                                                                                  |
+| `<AREA>_CACHE_DIR`               | Host cache directory, relative to `PROJECT_ROOT` (Go, Rust, Python, Node.js, Terraform). Default: `.cache/<area>`.                |
+| `PROJECT_ROOT`                   | Directory mounted at `/workspace`. Default: the Git repository root.                                                              |
+| `CONTAINER_*`                    | Container options shared by every module: `ENGINE`, `PULL_POLICY`, `MOUNT_MODE`, `USER`, `ENVS`, `VOLUMES`, `PORTS`, `RUN_ARGS`.  |
+
+Area prefixes: `GO`, `RUST`, `PYTHON`, `NODE`, `NIX`, `PROTO`, `TERRAFORM`, `MARKDOWN`, `AWS`.
+An empty value counts as unset.
+
+### Image version
+
+A module selects its image in this order:
+
+1. `<AREA>_IMAGE`: any image reference.
+2. `<AREA>_VERSION`: a tag of `ghcr.io/mr-chelyshkin/ci/<area>`.
+3. The ecosystem's pin file in `<AREA>_DIR`.
+4. The module default.
+
+Image tags are exact versions, so a version must have the form `X.Y.Z`.
+
+| Module                       | Pin file                                             | Default                                |
+|------------------------------|------------------------------------------------------|----------------------------------------|
+| Go                           | `go.mod`: `toolchain goX.Y.Z`, otherwise `go X.Y.Z` | —                                      |
+| Rust                         | `rust-toolchain.toml`: `channel`                     | —                                      |
+| Python                       | `.python-version`                                    | —                                      |
+| Node.js                      | `.node-version`, then `.nvmrc`                       | `22.23.1`                              |
+| Terraform                    | `.terraform-version`                                 | `1.15.9`                               |
+| Nix, Protobuf, Markdown, AWS | —                                                    | `2.35.2`, `1.50.0`, `1.0.0`, `2.36.24` |
+
+### Project-specific commands
+
+`exec` takes `CMD` and splits it like a shell command line. Wrap shell snippets in single quotes:
+
+```yaml
+tasks:
+  ci/generate:
+    desc: Check that generated code is up to date.
+    cmds:
+      - task: golang:exec
+        vars:
+          CMD: sh -c 'go generate ./... && git diff --exit-code'
+```
+
+To change container options for one call, pass `TASK_CONTEXT`. Later maps win in `merge`, so
+`merge (dict …) (.TASK_CONTEXT | default .)` sets a default and `merge (.TASK_CONTEXT | default .) (dict …)` forces a value:
+
+```yaml
+      - task: markdown:fmt
+        vars:
+          TASK_CONTEXT:
+            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
+```
+
+### Upgrading from v0.0.x
+
+| Before                                                                                       | After                                                               |
+|----------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
+| `_go/tool`, `_cargo/tool`, `_uv/tool`, `_npm/tool`, `_nix/tool`, `_proto/tool`, `_terraform/tool`, `_markdown/tool`, `_aws/tool` | `exec` |
+| `golang:gofumpt`, `golang:golangci`, `golang:govulncheck`                                    | `golang:fmt`, `golang:lint`, `golang:audit`                         |
+| `rust:clippy`, `rust:doc/build`, `rust:doc/build-nightly`                                    | `rust:lint`, `rust:docs`, `rust:docs/nightly`                       |
+| `nix:nixfmt`, `nix:nixfmt FMT_ARGS=''`, `nix:statix`, `nix:deadnix`                          | `nix:fmt`, `nix:fmt/fix`, `nix:lint`                                |
+| `proto:format/clang`, `proto:format/clang/fix`                                               | `proto:fmt`, `proto:fmt/fix`                                        |
+| `VULN_ARGS`, `DOC_ARGS`, `FORMAT_ARGS`, `FMT_PATHS`                                          | `AUDIT_ARGS`, `DOCS_ARGS`, `FMT_ARGS`, `FMT_ARGS`                   |
+| `BUF_ARGS`                                                                                   | `LINT_ARGS` for `lint`, `BUILD_ARGS` for `build`                    |
+| `PACKAGE_ARGS`, `PUBLISH_ARGS`                                                               | `PACKAGE_LIST_ARGS`, `PUBLISH_DRY_RUN_ARGS`                         |
+| `APP_DIR` (default `app`), `AUDIT_LEVEL`                                                     | `NODE_DIR` (default `.`), `AUDIT_ARGS` (default `--audit-level=high`) |
+| `TERRAFORM_DIR` default `tf`                                                                 | default `.`                                                         |
+| Mode flags in `*_ARGS`: `-l` (gofumpt), `--check` (cargo fmt, ruff), `-check -diff` (terraform) | Owned by the task; pass only extra arguments                     |
+| `STATIX_ARGS` / `DEADNIX_ARGS` with targets and `--fail`; nixfmt over every `*.nix` file      | Options only; Nix and Protobuf tasks take files from Git, honouring `.gitignore` |
+| Rust version from `rust-version` in `Cargo.toml`                                             | `channel` in `rust-toolchain.toml`, or `RUST_VERSION`               |
 
 ## Learn more
 

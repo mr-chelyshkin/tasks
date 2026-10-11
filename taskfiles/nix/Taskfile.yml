@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized formatting, linting, and Nix commands.
+# Nix: formatting and linting of .nix files, and Nix commands, in the Nix container.
 version: '3.53.1'
 silent: true
 
@@ -8,72 +8,97 @@ includes:
     taskfile: ../docker/Taskfile.yml
     internal: true
 
+vars:
+  git_root:
+    sh: git rev-parse --show-toplevel
+
 tasks:
-  # Run a command as the image user to allow writes to the Nix store.
-  _nix/tool:
+  exec:
+    desc: Run CMD in the Nix container.
     requires:
       vars: [CMD]
     vars:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      nix_version: '{{.context.NIX_VERSION | default "2.35.2"}}'
-
-      image: '{{if .context.NIX_IMAGE}}{{.context.NIX_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/nix:{{.nix_version}}{{end}}'
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.NIX_DIR | default "."}}'
+      version:         '{{.context.NIX_VERSION | default "2.35.2"}}'
+      image:           '{{.context.NIX_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/nix:%s" .version)}}'
+    preconditions:
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, NIX_DIR).'
+      - sh: test -n {{.context.NIX_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set NIX_VERSION (X.Y.Z) or NIX_IMAGE.
     cmds:
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
-          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
-
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default "image"}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-          ENVS:
-            - HOME=/tmp
-
-  # Check .nix files recursively; an empty FMT_ARGS enables in-place formatting.
-  nixfmt:
-    vars:
-      fmt_args:  '{{if hasKey . "FMT_ARGS"}}{{.FMT_ARGS}}{{else}}--check{{end}}'
-      fmt_paths: '{{.FMT_PATHS | default "."}}'
-    cmds:
-      - task: _nix/tool
-        vars:
-          CMD: 'find {{.fmt_paths}} -type f -name "*.nix" -exec nixfmt {{.fmt_args}} {} +'
-
+          PROJECT_ROOT: '{{.project_root}}'
+          WORKDIR:      '{{.dir}}'
           TASK_CONTEXT:
-            ref: 'merge (dict) (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+            ref: 'merge (dict "CONTAINER_USER" "image") .context'
 
-  # Lint Nix files with Statix's directory traversal and configured arguments.
-  statix:
-    vars:
-      statix_args: '{{.STATIX_ARGS | default "."}}'
+  fmt:
+    desc: Check formatting.
     cmds:
-      - task: _nix/tool
+      - task: exec
         vars:
-          CMD: 'statix check {{.statix_args}}'
-
+          CMD: |
+            sh -e -c '
+              git rev-parse --is-inside-work-tree > /dev/null
+              git ls-files -z --cached --others --exclude-standard -- "*.nix" |
+                xargs -0 -r nixfmt --check "$@"
+            ' nixfmt {{.FMT_ARGS}}
           TASK_CONTEXT:
-            ref: 'merge (dict) (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+            ref: 'merge (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
 
-  # Report unused Nix declarations and fail when any are found.
-  deadnix:
-    vars:
-      deadnix_args: '{{.DEADNIX_ARGS | default "--fail ."}}'
+  lint:
+    desc: Run linter.
     cmds:
-      - task: _nix/tool
+      - task: exec
         vars:
-          CMD: 'deadnix {{.deadnix_args}}'
-
+          CMD: |
+            sh -e -c '
+              git rev-parse --is-inside-work-tree > /dev/null
+              files=$(mktemp)
+              git ls-files -z --cached --others --exclude-standard -- "*.nix" > "$files"
+              status=0
+              xargs -0 -r -n 1 statix check {{.STATIX_ARGS}} < "$files" || status=1
+              xargs -0 -r deadnix --fail {{.DEADNIX_ARGS}} < "$files" || status=1
+              exit "$status"
+            '
           TASK_CONTEXT:
-            ref: 'merge (dict) (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+            ref: 'merge (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+
+  fmt/fix:
+    desc: Fix formatting.
+    cmds:
+      - task: exec
+        vars:
+          CMD: |
+            sh -e -c '
+              git rev-parse --is-inside-work-tree > /dev/null
+              git ls-files -z --cached --others --exclude-standard -- "*.nix" |
+                xargs -0 -r nixfmt "$@"
+            ' nixfmt {{.FMT_ARGS}}
+          TASK_CONTEXT:
+            ref: 'merge (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'
+
+  lint/fix:
+    desc: Run linter and apply the available fixes.
+    cmds:
+      - task: exec
+        vars:
+          CMD: |
+            sh -e -c '
+              git rev-parse --is-inside-work-tree > /dev/null
+              files=$(mktemp)
+              git ls-files -z --cached --others --exclude-standard -- "*.nix" > "$files"
+              xargs -0 -r deadnix --edit {{.DEADNIX_ARGS}} < "$files"
+              xargs -0 -r -n 1 statix fix {{.STATIX_ARGS}} < "$files"
+            '
+          TASK_CONTEXT:
+            ref: 'merge (dict "CONTAINER_USER" "host") (.TASK_CONTEXT | default .)'

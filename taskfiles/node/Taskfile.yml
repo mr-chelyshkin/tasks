@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized npm workflows for Node.js projects.
+# Node.js projects (npm): scripts and dependency audits in the Node.js container.
 version: '3.53.1'
 silent: true
 
@@ -13,75 +13,74 @@ vars:
     sh: git rev-parse --show-toplevel
 
 tasks:
-  # Run npm command in container.
-  _npm/tool:
+  exec:
+    desc: Run CMD in the Node.js container.
     requires:
       vars: [CMD]
     vars:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      configured_root: '{{.context.PROJECT_ROOT   | default .git_root}}'
-      node_version:    '{{.context.NODE_VERSION   | default "22.23.1"}}'
-      app_dir:         '{{.context.APP_DIR        | default "app"}}'
-      cache_dir:       '{{.context.NODE_CACHE_DIR | default ".cache/node"}}'
-
-      image:        '{{if .context.NODE_IMAGE}}{{.context.NODE_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/node:{{.node_version}}{{end}}'
-      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.NODE_DIR | default "."}}'
+      version:
+        sh: |
+          dir={{joinPath .project_root .dir | shellQuote}}
+          if [ -n {{.context.NODE_IMAGE | default "" | shellQuote}} ]; then
+            :
+          elif [ -n {{.context.NODE_VERSION | default "" | shellQuote}} ]; then
+            printf '%s\n' {{.context.NODE_VERSION | default "" | shellQuote}}
+          elif [ -f "$dir/.node-version" ]; then
+            sed -nE '1s/^[[:space:]]*v?([^[:space:]]+).*/\1/p' "$dir/.node-version"
+          elif [ -f "$dir/.nvmrc" ]; then
+            sed -nE '1s/^[[:space:]]*v?([^[:space:]]+).*/\1/p' "$dir/.nvmrc"
+          else
+            printf '%s\n' 22.23.1
+          fi
+      image: '{{.context.NODE_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/node:%s" .version)}}'
+    preconditions:
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, NODE_DIR).'
+      - sh: test -n {{.context.NODE_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set NODE_VERSION (X.Y.Z) or NODE_IMAGE, or pin an exact version in .node-version or .nvmrc.
     cmds:
-      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
           PROJECT_ROOT: '{{.project_root}}'
-          WORKDIR:      '/workspace/{{.app_dir}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
-
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-          VOLUMES:
-            - '{{.project_root}}/{{.cache_dir}}:/tmp/npm-cache:rw'
-
+          WORKDIR:      '{{.dir}}'
+          CACHE_DIR:    '{{.context.NODE_CACHE_DIR | default ".cache/node"}}'
+          CACHE_TARGET: /tmp/node-cache
           ENVS:
-            - HOME=/tmp
-            - NPM_CONFIG_CACHE=/tmp/npm-cache
+            - NPM_CONFIG_CACHE=/tmp/node-cache
             - NPM_CONFIG_UPDATE_NOTIFIER=false
+          TASK_CONTEXT:
+            ref: .context
 
-  # Run npm script.
+  audit:
+    desc: Audit dependencies.
+    cmds:
+      - task: exec
+        vars:
+          CMD: |
+            sh -c '
+              npm ci && exec npm audit "$@"
+            ' npm {{.AUDIT_ARGS | default "--audit-level=high"}}
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   run:
+    desc: Run the npm script SCRIPT.
     requires:
       vars: [SCRIPT]
     cmds:
-      - task: _npm/tool
+      - task: exec
         vars:
           CMD: |
             sh -c '
               npm ci && exec npm run "$1"
             ' npm {{.SCRIPT | shellQuote}}
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Run npm audit.
-  audit:
-    vars:
-      audit_level: '{{.AUDIT_LEVEL | default "high"}}'
-    cmds:
-      - task: _npm/tool
-        vars:
-          CMD: |
-            sh -c '
-              npm ci && exec npm audit --audit-level "$1"
-            ' npm {{.audit_level | shellQuote}}
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
