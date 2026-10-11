@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized development and CI workflows for Rust projects.
+# Rust projects: formatting, linting, tests, audits, documentation and builds in the Rust container.
 version: '3.53.1'
 silent: true
 
@@ -13,233 +13,196 @@ vars:
     sh: git rev-parse --show-toplevel
 
 tasks:
-  # Run a Cargo command in the container.
-  _cargo/tool:
+  exec:
+    desc: Run CMD in the Rust container.
     requires:
       vars: [CMD]
     vars:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      configured_root: '{{.context.PROJECT_ROOT   | default .git_root}}'
-      cache_dir:       '{{.context.RUST_CACHE_DIR | default ".cache/rust"}}'
-
-      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
-      rust_version:
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.RUST_DIR | default "."}}'
+      version:
         sh: |
-          manifest_path={{printf "%s/Cargo.toml" .project_root | shellQuote}}
-
-          if [ -n {{.context.RUST_VERSION | default "" | shellQuote}} ]; then
+          dir={{joinPath .project_root .dir | shellQuote}}
+          if [ -n {{.context.RUST_IMAGE | default "" | shellQuote}} ]; then
+            :
+          elif [ -n {{.context.RUST_VERSION | default "" | shellQuote}} ]; then
             printf '%s\n' {{.context.RUST_VERSION | default "" | shellQuote}}
-          elif [ -z {{.context.RUST_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
-            sed -nE "s/^[[:space:]]*(rust-version|\"rust-version\"|'rust-version')[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\2/p" \
-              "$manifest_path" | head -n 1
+          elif [ -f "$dir/rust-toolchain.toml" ]; then
+            sed -nE "s/^[[:space:]]*channel[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" "$dir/rust-toolchain.toml" | head -n 1
           fi
-      image: '{{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/rust:{{.rust_version}}{{end}}'
+      image: '{{.context.RUST_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/rust:%s" .version)}}'
 
       rust_flags:    '{{.RUSTFLAGS    | default .context.RUSTFLAGS    | default "-D warnings"}}'
       rustdoc_flags: '{{.RUSTDOCFLAGS | default .context.RUSTDOCFLAGS | default ""}}'
     preconditions:
-      - sh: test -n {{if .context.RUST_IMAGE}}{{.context.RUST_IMAGE | shellQuote}}{{else}}{{.rust_version | default "" | shellQuote}}{{end}}
-        msg: Set RUST_VERSION or RUST_IMAGE, or add rust-version to Cargo.toml.
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, RUST_DIR).'
+      - sh: test -n {{.context.RUST_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set RUST_VERSION (X.Y.Z) or RUST_IMAGE, or pin an exact channel in rust-toolchain.toml.
     cmds:
-      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
           PROJECT_ROOT: '{{.project_root}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
-
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-          VOLUMES:
-            - '{{.project_root}}/{{.cache_dir}}:/tmp/rust-cache:rw'
-
+          WORKDIR:      '{{.dir}}'
+          CACHE_DIR:    '{{.context.RUST_CACHE_DIR | default ".cache/rust"}}'
+          CACHE_TARGET: /tmp/rust-cache
           ENVS:
             - CARGO_TARGET_DIR=/tmp/rust-cache/target
             - CARGO_HOME=/tmp/rust-cache/cargo
             - RUSTUP_NO_UPDATE_CHECK=1
             - CARGO_INCREMENTAL=0
             - RUSTFLAGS={{.rust_flags}}
-            - '{{if .rust_version}}RUSTUP_TOOLCHAIN={{.rust_version}}{{end}}'
+            - '{{if .version}}RUSTUP_TOOLCHAIN={{.version}}{{end}}'
             - '{{if .rustdoc_flags}}RUSTDOCFLAGS={{.rustdoc_flags}}{{end}}'
+          TASK_CONTEXT:
+            ref: .context
 
-  # Check Rust formatting.
   fmt:
-    vars:
-      fmt_args: '{{.FMT_ARGS | default "--check --verbose"}}'
+    desc: Check formatting.
     cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
-          CMD: 'cargo fmt {{.fmt_args}}'
-
+          CMD: 'cargo fmt --check {{.FMT_ARGS | default "--all"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Type-check the Rust project.
-  check:
-    vars:
-      check_args: '{{.CHECK_ARGS | default ""}}'
+  lint:
+    desc: Run linter.
     cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
-          CMD: 'cargo check {{.check_args}}'
-
+          CMD: 'cargo clippy {{.LINT_ARGS | default "--workspace --all-features -- -D warnings"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Build the selected Rust package with cargo build.
-  build:
-    requires:
-      vars: [CRATE]
-    vars:
-      build_args: '{{.BUILD_ARGS | default ""}}'
-    cmds:
-      - task: _cargo/tool
-        vars:
-          CMD: 'cargo build -p {{.CRATE | shellQuote}} {{.build_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Lint Rust targets with cargo clippy.
-  clippy:
-    vars:
-      clippy_args: '{{.CLIPPY_ARGS | default "--workspace --all-features -- -D warnings"}}'
-    cmds:
-      - task: _cargo/tool
-        vars:
-          CMD: 'cargo clippy {{.clippy_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Run Rust tests with cargo test.
   test:
-    vars:
-      test_args: '{{.TEST_ARGS | default "--workspace --all-features"}}'
+    desc: Run tests.
     cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
-          CMD: 'cargo test {{.test_args}}'
-
+          CMD: 'cargo test {{.TEST_ARGS | default "--workspace --all-features"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Run Rust benchmarks with cargo bench.
-  bench:
-    vars:
-      bench_args: '{{.BENCH_ARGS | default ""}}'
-    cmds:
-      - task: _cargo/tool
-        vars:
-          CMD: 'cargo bench {{.bench_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Scan Rust dependencies.
   audit:
+    desc: Audit dependencies.
     cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
-          CMD: cargo audit
-
+          CMD: 'cargo audit {{.AUDIT_ARGS}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Validate publishing the selected crate without uploading it.
-  publish/dry-run:
-    requires:
-      vars: [CRATE]
-    vars:
-      publish_args: '{{.PUBLISH_ARGS | default "--all-features"}}'
+  docs:
+    desc: Build documentation.
     cmds:
-      - task: _cargo/tool
-        vars:
-          CMD: 'cargo publish --dry-run -p {{.CRATE | shellQuote}} {{.publish_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # List files included in the selected crate package.
-  package/list:
-    requires:
-      vars: [CRATE]
-    vars:
-      package_args: '{{.PACKAGE_ARGS | default "--locked"}}'
-    cmds:
-      - task: _cargo/tool
-        vars:
-          CMD: 'cargo package --list -p {{.CRATE | shellQuote}} {{.package_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Build Rust API documentation while denying rustdoc warnings.
-  doc/build:
-    vars:
-      doc_args: '{{.DOC_ARGS | default ""}}'
-    cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
           RUSTDOCFLAGS: -D warnings
-          CMD:          'cargo doc {{.doc_args}}'
-
+          CMD:          'cargo doc {{.DOCS_ARGS}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Build Rust API docs.
-  doc/build-nightly:
+  build:
+    desc: Build crate CRATE.
+    requires:
+      vars: [CRATE]
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'cargo build -p {{.CRATE | shellQuote}} {{.BUILD_ARGS}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  fmt/fix:
+    desc: Fix formatting.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'cargo fmt {{.FMT_ARGS | default "--all"}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  lint/fix:
+    desc: Run linter and apply the available fixes.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'cargo clippy --fix --allow-dirty --allow-staged {{.LINT_ARGS | default "--workspace --all-features -- -D warnings"}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  audit/fix:
+    desc: Upgrade vulnerable dependencies.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'cargo audit fix {{.AUDIT_ARGS}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  check:
+    desc: Check that the code compiles.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'cargo check {{.CHECK_ARGS}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  bench:
+    desc: Run benchmarks.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'cargo bench {{.BENCH_ARGS}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  docs/nightly:
+    desc: Build documentation as docs.rs does.
     vars:
       manifest_path: '{{if .MANIFEST_PATH}}{{.MANIFEST_PATH}}{{else if .CRATE}}crates/{{.CRATE}}/Cargo.toml{{else}}Cargo.toml{{end}}'
-      docs_args:     '{{.DOCS_ARGS | default "--all-features"}}'
     cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
           RUSTFLAGS: --cap-lints warn
           CMD: >-
             sh -eu -c 'exec cargo +"$RUST_VERSION" rustdoc "$@"' cargo-rustdoc
             --lib
             --manifest-path {{.manifest_path | shellQuote}}
-            {{.docs_args}}
+            {{.DOCS_NIGHTLY_ARGS | default "--all-features"}}
             -Zrustdoc-map
             -Zunstable-options
             -Zrustdoc-scrape-examples
             --config 'build.rustdocflags=["--cfg","docsrs","-Z","unstable-options","--cap-lints","warn"]'
-
           TASK_CONTEXT:
             ref: 'merge (dict) (.TASK_CONTEXT | default .) (dict "RUST_IMAGE" "rustlang/rust:nightly" "RUST_VERSION" "" "CONTAINER_PULL_POLICY" "always")'
 
-  # Format Rust source.
-  fmt/fix:
-    desc: Run cargo fmt in the configured container.
-    vars:
-      fmt_args: '{{.FMT_ARGS | default ""}}'
+  package/list:
+    desc: List the files in the CRATE package.
+    requires:
+      vars: [CRATE]
     cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
-          CMD: 'cargo fmt {{.fmt_args}}'
-
+          CMD: 'cargo package --list -p {{.CRATE | shellQuote}} {{.PACKAGE_LIST_ARGS | default "--locked"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Apply cargo audit fixes to vulnerable dependencies.
-  audit/fix:
-    desc: Run cargo audit fix.
+  publish/dry-run:
+    desc: Check that CRATE can be published.
+    requires:
+      vars: [CRATE]
     cmds:
-      - task: _cargo/tool
+      - task: exec
         vars:
-          CMD: cargo audit fix
-
+          CMD: 'cargo publish --dry-run -p {{.CRATE | shellQuote}} {{.PUBLISH_DRY_RUN_ARGS | default "--all-features"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized development and CI workflows for Go projects.
+# Go projects: formatting, linting, tests, vulnerability scanning and builds in the Go container.
 version: '3.53.1'
 silent: true
 
@@ -13,8 +13,8 @@ vars:
     sh: git rev-parse --show-toplevel
 
 tasks:
-  # Run an arbitrary Go toolchain command in the configured container.
-  _go/tool:
+  exec:
+    desc: Run CMD in the Go container.
     requires:
       vars: [CMD]
     vars:
@@ -22,84 +22,90 @@ tasks:
         ref: '.TASK_CONTEXT | default .'
 
       configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
-      cache_dir:       '{{.context.GO_CACHE_DIR | default ".cache/go"}}'
-
-      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
-      go_version:
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.GO_DIR | default "."}}'
+      version:
         sh: |
-          manifest_path={{printf "%s/go.mod" .project_root | shellQuote}}
-
-          if [ -n {{.context.GO_VERSION | default "" | shellQuote}} ]; then
+          dir={{joinPath .project_root .dir | shellQuote}}
+          if [ -n {{.context.GO_IMAGE | default "" | shellQuote}} ]; then
+            :
+          elif [ -n {{.context.GO_VERSION | default "" | shellQuote}} ]; then
             printf '%s\n' {{.context.GO_VERSION | default "" | shellQuote}}
-          elif [ -z {{.context.GO_IMAGE | default "" | shellQuote}} ] && [ -f "$manifest_path" ]; then
-            sed -nE 's/^[[:space:]]*go[[:space:]]+([^[:space:]]+).*/\1/p' "$manifest_path" | head -n 1
+          elif [ -f "$dir/go.mod" ]; then
+            toolchain=$(sed -nE 's/^[[:space:]]*toolchain[[:space:]]+go([^[:space:]]+).*/\1/p' "$dir/go.mod" | head -n 1)
+            if [ -n "$toolchain" ]; then
+              printf '%s\n' "$toolchain"
+            else
+              sed -nE 's/^[[:space:]]*go[[:space:]]+([^[:space:]]+).*/\1/p' "$dir/go.mod" | head -n 1
+            fi
           fi
-      image: '{{if .context.GO_IMAGE}}{{.context.GO_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/golang:{{.go_version}}{{end}}'
+      image: '{{.context.GO_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/golang:%s" .version)}}'
     preconditions:
-      - sh: test -n {{if .context.GO_IMAGE}}{{.context.GO_IMAGE | shellQuote}}{{else}}{{.go_version | default "" | shellQuote}}{{end}}
-        msg: Set GO_VERSION or GO_IMAGE, or add a go directive to go.mod.
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, GO_DIR).'
+      - sh: test -n {{.context.GO_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set GO_VERSION (X.Y.Z) or GO_IMAGE, or pin an exact version in go.mod (toolchain goX.Y.Z or go X.Y.Z).
     cmds:
-      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
           PROJECT_ROOT: '{{.project_root}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
-
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-          VOLUMES:
-            - '{{.project_root}}/{{.cache_dir}}:/tmp/go-cache:rw'
-
+          WORKDIR:      '{{.dir}}'
+          CACHE_DIR:    '{{.context.GO_CACHE_DIR | default ".cache/go"}}'
+          CACHE_TARGET: /tmp/go-cache
           ENVS:
-            - HOME=/tmp
             - GOPATH=/tmp/go-cache/gopath
             - GOCACHE=/tmp/go-cache/build
             - GOMODCACHE=/tmp/go-cache/mod
+          TASK_CONTEXT:
+            ref: .context
 
-  # Check Go source files using gofumpt's directory traversal.
-  gofumpt:
-    vars:
-      fmt_args: '{{.FMT_ARGS | default "-l ."}}'
+  fmt:
+    desc: Check formatting.
     cmds:
-      - task: _go/tool
+      - task: exec
         vars:
           CMD: |
             sh -e -c '
-              bad=$(gofumpt {{.fmt_args}})
-
-              if [ -n "$bad" ]; then
-                printf "gofumpt: unformatted files:\n%s\n" "$bad" >&2
+              unformatted=$(gofumpt -l {{.FMT_ARGS | default "."}})
+              if [ -n "$unformatted" ]; then
+                printf "gofumpt: unformatted files:\n%s\n" "$unformatted" >&2
                 exit 1
               fi
             '
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Run golangci-lint with the configured arguments.
-  golangci:
-    vars:
-      lint_args: '{{.LINT_ARGS | default "./..."}}'
+  lint:
+    desc: Run linter.
     cmds:
-      - task: _go/tool
+      - task: exec
         vars:
-          CMD: 'golangci-lint run {{.lint_args}}'
-
+          CMD: 'golangci-lint run {{.LINT_ARGS | default "./..."}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Build a named Go binary for the configured target platform.
+  test:
+    desc: Run tests.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'go test {{.TEST_ARGS | default "./..."}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  audit:
+    desc: Audit dependencies.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'govulncheck {{.AUDIT_ARGS | default "./..."}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   build:
+    desc: Build binary NAME.
     requires:
       vars: [NAME]
     vars:
@@ -110,7 +116,7 @@ tasks:
       go_arch:     '{{.GOARCH      | default "amd64"}}'
       cgo_enabled: '{{.CGO_ENABLED | default "0"}}'
     cmds:
-      - task: _go/tool
+      - task: exec
         vars:
           CMD: |
             sh -c '
@@ -125,52 +131,41 @@ tasks:
               go build {{.build_args}} \
               -o {{printf "%s/%s-%s-%s" .output_dir .NAME .go_os .go_arch | shellQuote}} \
               {{.main_pkg | shellQuote}}
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Scan Go packages for known vulnerabilities.
-  govulncheck:
-    vars:
-      vuln_args: '{{.VULN_ARGS | default "./..."}}'
+  fmt/fix:
+    desc: Fix formatting.
     cmds:
-      - task: _go/tool
+      - task: exec
         vars:
-          CMD: 'govulncheck {{.vuln_args}}'
-
+          CMD: 'gofumpt -w {{.FMT_ARGS | default "."}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Run Go tests with the configured arguments.
-  test:
-    vars:
-      test_args: '{{.TEST_ARGS | default "./..."}}'
+  lint/fix:
+    desc: Run linter and apply the available fixes.
     cmds:
-      - task: _go/tool
+      - task: exec
         vars:
-          CMD: 'go test {{.test_args}}'
-
+          CMD: 'golangci-lint run --fix {{.LINT_ARGS | default "./..."}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Update go.mod and go.sum with go mod tidy.
   tidy:
-    desc: Run go mod tidy.
+    desc: Tidy go.mod and go.sum.
     cmds:
-      - task: _go/tool
+      - task: exec
         vars:
           CMD: go mod tidy
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Run go mod vendor.
   vendor:
-    desc: Run go mod vendor.
+    desc: Vendor dependencies.
     cmds:
-      - task: _go/tool
+      - task: exec
         vars:
           CMD: go mod vendor
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

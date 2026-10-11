@@ -1,57 +1,62 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Shared container runner for project tooling.
+# Shared container runner. Tool modules decide what to run; this file decides how.
 version: '3.53.1'
 silent: true
 
-vars:
-  git_root:
-    sh: git rev-parse --show-toplevel
-
 tasks:
-  # Run a command in a container.
   run:
+    desc: Run CMD in IMAGE with PROJECT_ROOT mounted at /workspace.
     requires:
-      vars: [IMAGE, CMD, MOUNT_DIR]
+      vars: [IMAGE, CMD, PROJECT_ROOT]
     vars:
-      configured_root: '{{if .PROJECT_ROOT}}{{.PROJECT_ROOT}}{{else}}{{.git_root}}{{end}}'
-      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      context:
+        ref: '.TASK_CONTEXT | default .'
 
-      engine:        '{{.CONTAINER_ENGINE | default "docker"}}'
-      pull_policy:   '{{.PULL_POLICY      | default "missing"}}'
-      mount_target:  '{{.MOUNT_TARGET     | default "/workspace"}}'
-      mount_mode:    '{{.MOUNT_MODE       | default "rw"}}'
-      workdir:       '{{.WORKDIR          | default .mount_target}}'
-      user:          '{{.CONTAINER_USER   | default "host"}}'
-      run_args:      '{{.RUN_ARGS         | default ""}}'
-      ports:         '{{.PORTS            | default ""}}'
-      extra_envs:    '{{.EXTRA_ENVS       | default ""}}'
-      extra_volumes: '{{.EXTRA_VOLUMES    | default ""}}'
+      engine:        '{{.context.CONTAINER_ENGINE      | default "docker"}}'
+      pull_policy:   '{{.context.CONTAINER_PULL_POLICY | default "missing"}}'
+      mount_mode:    '{{.context.CONTAINER_MOUNT_MODE  | default "rw"}}'
+      user:          '{{.context.CONTAINER_USER        | default "host"}}'
+      run_args:      '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
+      ports:         '{{.context.CONTAINER_PORTS       | default ""}}'
+      extra_envs:    '{{.context.CONTAINER_ENVS        | default ""}}'
+      extra_volumes: '{{.context.CONTAINER_VOLUMES     | default ""}}'
+
+      workdir:   '{{.WORKDIR   | default "."}}'
+      cache_dir: '{{.CACHE_DIR | default ""}}'
+    preconditions:
+      - sh: test -d {{.PROJECT_ROOT | shellQuote}}
+        msg: 'PROJECT_ROOT does not exist or is not a directory: {{.PROJECT_ROOT}}'
+      - sh: test -z {{.cache_dir | shellQuote}} || test -n {{.CACHE_TARGET | default "" | shellQuote}}
+        msg: CACHE_DIR requires CACHE_TARGET.
     cmds:
       - |
         set -eu
 
-        project_root=$(cd {{printf "%s" .project_root | shellQuote}} && pwd -P)
-        mount_path=$(cd "$project_root" && cd {{.MOUNT_DIR | shellQuote}} && pwd -P)
+        project_root=$(cd {{.PROJECT_ROOT | shellQuote}} && pwd -P)
 
-        mount_target={{.mount_target | shellQuote}}
+        require_inside() {
+          case "$2" in
+            "$project_root"|"$project_root"/*)
+              ;;
+            *)
+              printf '%s is outside PROJECT_ROOT: %s\n' "$1" "$2" >&2
+              exit 2
+              ;;
+          esac
+        }
+
+        workdir=$(cd "$project_root" && cd {{.workdir | shellQuote}} && pwd -P)
+        require_inside WORKDIR "$workdir"
+
         mount_mode={{.mount_mode | shellQuote}}
         pull_policy={{.pull_policy | shellQuote}}
         container_user={{.user | shellQuote}}
-
-        case "$mount_path" in
-          "$project_root"|"$project_root"/*)
-            ;;
-          *)
-            printf 'mount path is outside PROJECT_ROOT: %s\n' "$mount_path" >&2
-            exit 2
-            ;;
-        esac
 
         case "$mount_mode" in
           ro|rw)
             ;;
           *)
-            printf 'invalid mount mode: %s\n' "$mount_mode" >&2
+            printf 'invalid CONTAINER_MOUNT_MODE: %s\n' "$mount_mode" >&2
             exit 2
             ;;
         esac
@@ -60,7 +65,7 @@ tasks:
           always|missing|never)
             ;;
           *)
-            printf 'invalid pull policy: %s\n' "$pull_policy" >&2
+            printf 'invalid CONTAINER_PULL_POLICY: %s\n' "$pull_policy" >&2
             exit 2
             ;;
         esac
@@ -81,16 +86,18 @@ tasks:
             ;;
         esac
 
-        set -- "$@" --volume "$mount_path:$mount_target:$mount_mode"
-        {{range .VOLUMES}}
-        {{if .}}
-        set -- "$@" --volume {{. | shellQuote}}
-        {{end}}
+        set -- "$@" --volume "$project_root:/workspace:$mount_mode"
+        {{if .cache_dir}}
+        mkdir -p "$project_root"/{{.cache_dir | shellQuote}}
+        cache_path=$(cd "$project_root" && cd {{.cache_dir | shellQuote}} && pwd -P)
+        require_inside CACHE_DIR "$cache_path"
+        set -- "$@" --volume "$cache_path:"{{.CACHE_TARGET | shellQuote}}":rw"
         {{end}}
         {{range (.extra_volumes | splitArgs)}}
         set -- "$@" --volume {{. | shellQuote}}
         {{end}}
 
+        set -- "$@" --env HOME=/tmp
         {{range .ENVS}}
         {{if .}}
         set -- "$@" --env {{. | shellQuote}}
@@ -107,7 +114,7 @@ tasks:
         set -- "$@" {{. | shellQuote}}
         {{end}}
 
-        set -- "$@" --workdir {{.workdir | shellQuote}} {{.IMAGE | shellQuote}}
+        set -- "$@" --workdir "/workspace${workdir#"$project_root"}" {{.IMAGE | shellQuote}}
         {{range (.CMD | splitArgs)}}
         set -- "$@" {{. | shellQuote}}
         {{end}}

@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized workflows for Terraform configurations.
+# Terraform configurations: formatting, validation and plans in the Terraform container.
 version: '3.53.1'
 silent: true
 
@@ -13,127 +13,104 @@ vars:
     sh: git rev-parse --show-toplevel
 
 tasks:
-  # Run a Terraform command in the configured container.
-  _terraform/tool:
+  exec:
+    desc: Run CMD in the Terraform container.
     requires:
       vars: [CMD]
     vars:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      configured_root:   '{{.context.PROJECT_ROOT        | default .git_root}}'
-      terraform_dir:     '{{.context.TERRAFORM_DIR       | default "tf"}}'
-      terraform_version: '{{.context.TERRAFORM_VERSION   | default "1.15.9"}}'
-      cache_dir:         '{{.context.TERRAFORM_CACHE_DIR | default ".cache/terraform"}}'
-
-      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
-      image:        '{{if .context.TERRAFORM_IMAGE}}{{.context.TERRAFORM_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/terraform:{{.terraform_version}}{{end}}'
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.TERRAFORM_DIR | default "."}}'
+      version:
+        sh: |
+          dir={{joinPath .project_root .dir | shellQuote}}
+          if [ -n {{.context.TERRAFORM_IMAGE | default "" | shellQuote}} ]; then
+            :
+          elif [ -n {{.context.TERRAFORM_VERSION | default "" | shellQuote}} ]; then
+            printf '%s\n' {{.context.TERRAFORM_VERSION | default "" | shellQuote}}
+          elif [ -f "$dir/.terraform-version" ]; then
+            sed -nE '1s/^[[:space:]]*v?([^[:space:]]+).*/\1/p' "$dir/.terraform-version"
+          else
+            printf '%s\n' 1.15.9
+          fi
+      image: '{{.context.TERRAFORM_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/terraform:%s" .version)}}'
     preconditions:
-      - sh: test -d {{.project_root | shellQuote}}
-        msg: 'PROJECT_ROOT does not exist or is not a directory: {{.project_root}}'
-      - sh: test -d {{printf "%s/%s" .project_root .terraform_dir | shellQuote}}
-        msg: 'Terraform directory does not exist or is not a directory: {{printf "%s/%s" .project_root .terraform_dir}}'
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, TERRAFORM_DIR).'
+      - sh: test -n {{.context.TERRAFORM_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set TERRAFORM_VERSION (X.Y.Z) or TERRAFORM_IMAGE, or pin an exact version in .terraform-version.
     cmds:
-      - mkdir -p {{printf "%s/%s/plugins" .project_root .cache_dir | shellQuote}}
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
           PROJECT_ROOT: '{{.project_root}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
-
-          WORKDIR:      '/workspace/{{.terraform_dir}}'
-
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-          VOLUMES:
-            - '{{.project_root}}/{{.cache_dir}}:/tmp/terraform-cache:rw'
-
+          WORKDIR:      '{{.dir}}'
+          CACHE_DIR:    '{{.context.TERRAFORM_CACHE_DIR | default ".cache/terraform"}}'
+          CACHE_TARGET: /tmp/terraform-cache
           ENVS:
-            - HOME=/tmp
             - CHECKPOINT_DISABLE=1
             - TF_IN_AUTOMATION=1
-            - TF_PLUGIN_CACHE_DIR=/tmp/terraform-cache/plugins
-
-  # Initialize Terraform.
-  _terraform/init:
-    vars:
-      init_args: '{{.INIT_ARGS | default "-input=false -lockfile=readonly"}}'
-    cmds:
-      - task: _terraform/tool
-        vars:
-          CMD: 'terraform init {{.init_args}}'
-
+            - TF_PLUGIN_CACHE_DIR=/tmp/terraform-cache
           TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
+            ref: .context
 
-  # Check Terraform formatting.
   fmt:
-    vars:
-      fmt_args: '{{.FMT_ARGS | default "-check -recursive -diff"}}'
+    desc: Check formatting.
     cmds:
-      - task: _terraform/tool
+      - task: exec
         vars:
-          CMD: 'terraform fmt {{.fmt_args}}'
-
+          CMD: 'terraform fmt -check -diff {{.FMT_ARGS | default "-recursive"}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Initialize without a backend and validate the Terraform configuration.
-  validate:
-    vars:
-      init_args:     '{{.INIT_ARGS     | default "-backend=false -input=false -lockfile=readonly"}}'
-      validate_args: '{{.VALIDATE_ARGS | default "-no-color"}}'
-    cmds:
-      - task: _terraform/tool
-        vars:
-          CMD: 'terraform init {{.init_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-      - task: _terraform/tool
-        vars:
-          CMD: 'terraform validate {{.validate_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Initialize and create a Terraform execution plan.
-  plan:
-    vars:
-      init_args: '{{.INIT_ARGS | default "-input=false -lockfile=readonly"}}'
-      plan_args: '{{.PLAN_ARGS | default "-input=false -lock-timeout=5m -no-color"}}'
-    cmds:
-      - task: _terraform/init
-        vars:
-          INIT_ARGS: '{{.init_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-      - task: _terraform/tool
-        vars:
-          CMD: 'terraform plan {{.plan_args}}'
-
-          TASK_CONTEXT:
-            ref: '.TASK_CONTEXT | default .'
-
-  # Apply Terraform formatting.
   fmt/fix:
-    desc: Format Terraform files.
-    vars:
-      fmt_args: '{{.FMT_ARGS | default "-recursive"}}'
+    desc: Fix formatting.
     cmds:
-      - task: _terraform/tool
+      - task: exec
         vars:
-          CMD: 'terraform fmt {{.fmt_args}}'
+          CMD: 'terraform fmt {{.FMT_ARGS | default "-recursive"}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
 
+  validate:
+    desc: Validate the configuration.
+    cmds:
+      - task: _init
+        vars:
+          INIT_ARGS: '{{.INIT_ARGS | default "-backend=false -input=false -lockfile=readonly"}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+      - task: exec
+        vars:
+          CMD: 'terraform validate {{.VALIDATE_ARGS | default "-no-color"}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  plan:
+    desc: Create an execution plan.
+    cmds:
+      - task: _init
+        vars:
+          INIT_ARGS: '{{.INIT_ARGS | default "-input=false -lockfile=readonly"}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+      - task: exec
+        vars:
+          CMD: 'terraform plan {{.PLAN_ARGS | default "-input=false -lock-timeout=5m -no-color"}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  _init:
+    internal: true
+    requires:
+      vars: [INIT_ARGS]
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'terraform init {{.INIT_ARGS}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

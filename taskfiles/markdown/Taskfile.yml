@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized Markdown formatting with mdformat and GitHub Flavored Markdown support.
+# Markdown: formatting with mdformat and GitHub Flavored Markdown support in the Markdown container.
 version: '3.53.1'
 silent: true
 
@@ -8,59 +8,53 @@ includes:
     taskfile: ../docker/Taskfile.yml
     internal: true
 
+vars:
+  git_root:
+    sh: git rev-parse --show-toplevel
+
 tasks:
-  _markdown/tool:
+  exec:
+    desc: Run CMD in the Markdown container.
     requires:
       vars: [CMD]
     vars:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      markdown_version: '{{.context.MARKDOWN_VERSION | default "1.0.0"}}'
-
-      image: '{{if .context.MARKDOWN_IMAGE}}{{.context.MARKDOWN_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/markdown:{{.markdown_version}}{{end}}'
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.MARKDOWN_DIR | default "."}}'
+      version:         '{{.context.MARKDOWN_VERSION | default "1.0.0"}}'
+      image:           '{{.context.MARKDOWN_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/markdown:%s" .version)}}'
+    preconditions:
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, MARKDOWN_DIR).'
+      - sh: test -n {{.context.MARKDOWN_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set MARKDOWN_VERSION (X.Y.Z) or MARKDOWN_IMAGE.
     cmds:
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
-          PROJECT_ROOT: '{{.context.PROJECT_ROOT | default ""}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
+          PROJECT_ROOT: '{{.project_root}}'
+          WORKDIR:      '{{.dir}}'
+          TASK_CONTEXT:
+            ref: .context
 
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-  # Check Markdown formatting.
   fmt:
-    desc: Check Markdown formatting in the configured container.
-    vars:
-      fmt_args:  '{{.FMT_ARGS | default ""}}'
-      fmt_paths: '{{.FMT_PATHS | default "."}}'
+    desc: Check formatting.
     cmds:
-      - task: _markdown/tool
+      - task: exec
         vars:
-          CMD: 'mdformat --check {{.fmt_args}} {{.fmt_paths}}'
-
+          CMD: 'mdformat --check {{.FMT_ARGS | default "."}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Apply the same Markdown style in place.
   fmt/fix:
-    desc: Apply Markdown formatting in the configured container.
-    vars:
-      fmt_args:  '{{.FMT_ARGS | default ""}}'
-      fmt_paths: '{{.FMT_PATHS | default "."}}'
+    desc: Fix formatting.
     cmds:
-      - task: _markdown/tool
+      - task: exec
         vars:
-          CMD: 'mdformat {{.fmt_args}} {{.fmt_paths}}'
-
+          CMD: 'mdformat {{.FMT_ARGS | default "."}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'

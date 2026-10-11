@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-# Containerized uv workflows for Python projects.
+# Python projects (uv): formatting, linting, tests, audits, type checks and packaging in the Python container.
 version: '3.53.1'
 silent: true
 
@@ -13,57 +13,43 @@ vars:
     sh: git rev-parse --show-toplevel
 
 tasks:
-  # Run a command with uv and a container-local project environment.
-  _uv/tool:
+  exec:
+    desc: Run CMD in the Python container.
     requires:
       vars: [CMD]
     vars:
       context:
         ref: '.TASK_CONTEXT | default .'
 
-      configured_root: '{{.context.PROJECT_ROOT     | default .git_root}}'
-      cache_dir:       '{{.context.PYTHON_CACHE_DIR | default ".cache/python"}}'
-
-      project_root: '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
-      python_version:
+      configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
+      project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
+      dir:             '{{.context.PYTHON_DIR | default "."}}'
+      version:
         sh: |
-          version_path={{printf "%s/.python-version" .project_root | shellQuote}}
-
-          if [ -n {{.context.PYTHON_VERSION | default "" | shellQuote}} ]; then
+          dir={{joinPath .project_root .dir | shellQuote}}
+          if [ -n {{.context.PYTHON_IMAGE | default "" | shellQuote}} ]; then
+            :
+          elif [ -n {{.context.PYTHON_VERSION | default "" | shellQuote}} ]; then
             printf '%s\n' {{.context.PYTHON_VERSION | default "" | shellQuote}}
-          elif [ -z {{.context.PYTHON_IMAGE | default "" | shellQuote}} ] && [ -f "$version_path" ]; then
-            sed -nE 's/^[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$/\1/p' "$version_path" | head -n 1
+          elif [ -f "$dir/.python-version" ]; then
+            sed -nE '1s/^[[:space:]]*([^[:space:]]+).*/\1/p' "$dir/.python-version"
           fi
-      image: '{{if .context.PYTHON_IMAGE}}{{.context.PYTHON_IMAGE}}{{else}}ghcr.io/mr-chelyshkin/ci/python:{{.python_version}}{{end}}'
+      image: '{{.context.PYTHON_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/python:%s" .version)}}'
     preconditions:
-      - sh: test -d {{.project_root | shellQuote}}
-        msg: 'PROJECT_ROOT does not exist or is not a directory: {{.project_root}}'
-      - sh: test -n {{if .context.PYTHON_IMAGE}}{{.context.PYTHON_IMAGE | shellQuote}}{{else}}{{.python_version | default "" | shellQuote}}{{end}}
-        msg: Set PYTHON_VERSION or PYTHON_IMAGE, or pin a Python patch version in .python-version.
+      - sh: test -d {{joinPath .project_root .dir | shellQuote}}
+        msg: 'Directory does not exist: {{joinPath .project_root .dir}} (PROJECT_ROOT, PYTHON_DIR).'
+      - sh: test -n {{.context.PYTHON_IMAGE | default "" | shellQuote}} || printf '%s\n' {{.version | shellQuote}} | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: Set PYTHON_VERSION (X.Y.Z) or PYTHON_IMAGE, or pin an exact version in .python-version.
     cmds:
-      - mkdir -p {{printf "%s/%s" .project_root .cache_dir | shellQuote}}
       - task: docker:run
         vars:
           IMAGE:        '{{.image}}'
           CMD:          '{{.CMD}}'
           PROJECT_ROOT: '{{.project_root}}'
-          MOUNT_DIR:    .
-          MOUNT_TARGET: /workspace
-
-          CONTAINER_ENGINE: '{{.context.CONTAINER_ENGINE      | default ""}}'
-          PULL_POLICY:      '{{.context.CONTAINER_PULL_POLICY | default ""}}'
-          CONTAINER_USER:   '{{.context.CONTAINER_USER        | default ""}}'
-          MOUNT_MODE:       '{{.context.CONTAINER_MOUNT_MODE  | default ""}}'
-          RUN_ARGS:         '{{.context.CONTAINER_RUN_ARGS    | default ""}}'
-          PORTS:            '{{.context.CONTAINER_PORTS       | default ""}}'
-          EXTRA_ENVS:       '{{.context.CONTAINER_ENVS        | default ""}}'
-          EXTRA_VOLUMES:    '{{.context.CONTAINER_VOLUMES     | default ""}}'
-
-          VOLUMES:
-            - '{{.project_root}}/{{.cache_dir}}:/tmp/python-cache:rw'
-
+          WORKDIR:      '{{.dir}}'
+          CACHE_DIR:    '{{.context.PYTHON_CACHE_DIR | default ".cache/python"}}'
+          CACHE_TARGET: /tmp/python-cache
           ENVS:
-            - HOME=/tmp
             - UV_PROJECT_ENVIRONMENT=/tmp/python-venv
             - UV_CACHE_DIR=/tmp/python-cache/uv
             - UV_PYTHON_DOWNLOADS=never
@@ -71,67 +57,95 @@ tasks:
             - RUFF_CACHE_DIR=/tmp/python-cache/ruff
             - MYPY_CACHE_DIR=/tmp/python-cache/mypy
             - PYTHONDONTWRITEBYTECODE=1
+          TASK_CONTEXT:
+            ref: .context
 
-  # Check Python formatting with Ruff from the project lockfile.
   fmt:
-    vars:
-      fmt_args: '{{.FMT_ARGS | default "--check ."}}'
+    desc: Check formatting.
     cmds:
-      - task: _uv/tool
+      - task: exec
         vars:
-          CMD: 'uv run --locked ruff format {{.fmt_args}}'
-
+          CMD: 'uv run --locked ruff format --check {{.FMT_ARGS | default "."}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Lint Python with Ruff from the project lockfile.
   lint:
-    vars:
-      lint_args: '{{.LINT_ARGS | default "."}}'
+    desc: Run linter.
     cmds:
-      - task: _uv/tool
+      - task: exec
         vars:
-          CMD: 'uv run --locked ruff check {{.lint_args}}'
-
+          CMD: 'uv run --locked ruff check {{.LINT_ARGS | default "."}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Run mypy with the project's configuration and locked dependencies.
+  test:
+    desc: Run tests.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'uv run --locked pytest -o cache_dir=/tmp/python-cache/pytest {{.TEST_ARGS}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  audit:
+    desc: Audit dependencies.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'uv audit --locked {{.AUDIT_ARGS}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   typecheck:
-    vars:
-      typecheck_args: '{{.TYPECHECK_ARGS | default ""}}'
+    desc: Check types.
     cmds:
-      - task: _uv/tool
+      - task: exec
         vars:
-          CMD: 'uv run --locked mypy {{.typecheck_args}}'
-
+          CMD: 'uv run --locked mypy {{.TYPECHECK_ARGS}}'
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Validate the lockfile and build a fresh sdist and wheel for publication.
   build:
+    desc: Build sdist and wheel.
     vars:
       output_dir: '{{.OUTPUT_DIR | default "dist"}}'
     cmds:
-      - task: _uv/tool
+      - task: exec
         vars:
           CMD: |
             sh -eu -c '
               uv lock --check
               exec uv build --no-sources --clear --out-dir "$1"
             ' python-build {{.output_dir | shellQuote}}
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Install the built wheel in a clean environment and run a consumer smoke command.
+  fmt/fix:
+    desc: Fix formatting.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'uv run --locked ruff format {{.FMT_ARGS | default "."}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
+  lint/fix:
+    desc: Run linter and apply the available fixes.
+    cmds:
+      - task: exec
+        vars:
+          CMD: 'uv run --locked ruff check --fix {{.LINT_ARGS | default "."}}'
+          TASK_CONTEXT:
+            ref: '.TASK_CONTEXT | default .'
+
   package/check:
+    desc: Smoke-test the built wheel with PACKAGE_COMMAND.
     requires:
       vars: [PACKAGE_COMMAND]
     vars:
       output_dir: '{{.OUTPUT_DIR | default "dist"}}'
     cmds:
-      - task: _uv/tool
+      - task: exec
         vars:
           CMD: |
             sh -eu -c '
@@ -155,16 +169,15 @@ tasks:
               export PATH="/tmp/python-package-check/bin:$PATH"
               exec "$@"
             ' python-package-check {{.output_dir | shellQuote}} {{range (.PACKAGE_COMMAND | splitArgs)}}{{. | shellQuote}} {{end}}
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
 
-  # Require the release tag to match the declared package version.
   tag/check:
+    desc: Check that RELEASE_TAG matches the package version.
     requires:
       vars: [RELEASE_TAG]
     cmds:
-      - task: _uv/tool
+      - task: exec
         vars:
           CMD: |
             python -c '
@@ -179,6 +192,5 @@ tasks:
                 sys.exit(f"Release tag {actual!r} does not match package version {expected!r}")
             print(f"Release tag matches package version: {expected}")
             ' {{.RELEASE_TAG | shellQuote}}
-
           TASK_CONTEXT:
             ref: '.TASK_CONTEXT | default .'
