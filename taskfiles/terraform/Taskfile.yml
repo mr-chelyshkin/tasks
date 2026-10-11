@@ -55,13 +55,9 @@ tasks:
             - CHECKPOINT_DISABLE=1
             - TF_IN_AUTOMATION=1
             - TF_PLUGIN_CACHE_DIR=/tmp/terraform-cache
-            - AWS_ACCESS_KEY_ID
-            - AWS_SECRET_ACCESS_KEY
-            - AWS_SESSION_TOKEN
-            - AWS_REGION
-            - AWS_DEFAULT_REGION
           ENV_PREFIXES:
             - TF_VAR_
+            - TF_TOKEN_
           TASK_CONTEXT:
             ref: .context
 

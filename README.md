@@ -121,9 +121,24 @@ Every module follows the same rules, so a project that knows one module knows th
 Area prefixes: `GO`, `RUST`, `PYTHON`, `NODE`, `NIX`, `PROTO`, `TERRAFORM`, `MARKDOWN`, `AWS`.
 An empty value counts as unset.
 
-Terraform and AWS forward the AWS credential variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
-`AWS_REGION`, `AWS_DEFAULT_REGION`); Terraform also forwards every `TF_VAR_*`.
-They are passed by name, so their values never appear on a command line.
+`CONTAINER_*` can also come from the environment, so a CI job that obtains credentials can declare what to forward.
+
+### Credentials
+
+Modules forward variables by name, so their values never appear on a command line.
+Terraform forwards its own variables, `TF_VAR_*` and `TF_TOKEN_*`; the AWS module forwards the AWS credential variables.
+Provider credentials belong to the project or the CI job: forward variables with `CONTAINER_ENVS`,
+mount credential files with `CONTAINER_VOLUMES`. The container's `HOME` is `/tmp`.
+
+| Provider | CI                                                                                   | Local                                                                |
+|----------|--------------------------------------------------------------------------------------|----------------------------------------------------------------------|
+| AWS      | `CONTAINER_ENVS: AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_REGION` | `CONTAINER_VOLUMES: '{{.HOME}}/.aws:/tmp/.aws:ro'`, `CONTAINER_ENVS: AWS_PROFILE` |
+| GCP      | `CONTAINER_ENVS: GOOGLE_OAUTH_ACCESS_TOKEN GOOGLE_PROJECT`                           | `CONTAINER_VOLUMES: '{{.HOME}}/.config/gcloud:/tmp/.config/gcloud:ro'`         |
+| Azure    | `CONTAINER_ENVS: ARM_CLIENT_ID ARM_TENANT_ID ARM_SUBSCRIPTION_ID ARM_USE_OIDC ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN` | `CONTAINER_ENVS: ARM_CLIENT_ID ARM_CLIENT_SECRET ARM_TENANT_ID ARM_SUBSCRIPTION_ID` |
+
+A credential file outside the project, such as `GOOGLE_APPLICATION_CREDENTIALS`, is mounted and pointed to:
+`CONTAINER_VOLUMES: '{{.GOOGLE_APPLICATION_CREDENTIALS}}:/tmp/gcp.json:ro'` with
+`CONTAINER_ENVS: GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp.json`.
 
 ### Image version
 
@@ -187,7 +202,7 @@ To change container options for one call, pass `TASK_CONTEXT`. Later maps win in
 | `STATIX_ARGS` / `DEADNIX_ARGS` with targets and `--fail`; nixfmt over every `*.nix` file      | Options only; Nix and Protobuf tasks take files from Git, honouring `.gitignore` |
 | Rust version from `rust-version` in `Cargo.toml`                                             | `channel` in `rust-toolchain.toml`, or `RUST_VERSION`               |
 | Rust defaults without `--locked`                                                             | `--locked` in the defaults of `lint`, `test`, `check`, `bench`, `build`, `docs`, `publish/dry-run` |
-| AWS credentials and `TF_VAR_*` listed in `CONTAINER_ENVS` for Terraform                      | Forwarded by the module                                             |
+| `TF_VAR_*` listed in `CONTAINER_ENVS` for Terraform                                          | Forwarded by the module, with `TF_TOKEN_*`; provider credentials stay in `CONTAINER_ENVS` |
 | `proto:breaking` default baseline only at the repository root                                | Works in any `PROTO_DIR`                                            |
 | Check tasks mount the project read-write                                                     | `fmt`, `lint`, `typecheck`, `audit` mount it read-only by default   |
 | `node:audit` runs `npm ci` first                                                              | Audits `package-lock.json` without installing                       |
