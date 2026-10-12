@@ -17,13 +17,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check tag format
-        uses: mr-chelyshkin/actions/check-tag-format@v1
+        uses: mr-chelyshkin/actions/tag-format-check@v2
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Check that the tag is on main
-        uses: mr-chelyshkin/actions/check-tag-branch@v1
+        uses: mr-chelyshkin/actions/tag-branch-check@v2
         with:
           branch: main
 
