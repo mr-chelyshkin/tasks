@@ -16,7 +16,6 @@ jobs:
   check-label:
     name: check label
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
     steps:
       - uses: mr-chelyshkin/actions/check-changelog-label@v1
         with:

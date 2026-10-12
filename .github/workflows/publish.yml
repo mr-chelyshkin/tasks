@@ -15,7 +15,6 @@ jobs:
   verify:
     name: Verify ${{ github.ref_name }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
     steps:
       - name: Check tag format
         uses: mr-chelyshkin/actions/check-tag-format@v1
@@ -32,7 +31,6 @@ jobs:
     name: Publish ${{ github.ref_name }}
     needs: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
     permissions:
       contents: write
     steps:
