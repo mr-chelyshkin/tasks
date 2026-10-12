@@ -10,32 +10,13 @@
 
 ### Define a project command once. Run it locally and in CI with containerized tools.
 
-Local and CI workflows drift. Different tool versions, flags, and working
-directories turn one build into two systems to maintain.
-
-This repository provides reusable [Task](https://taskfile.dev/) modules for
-running development and delivery tools in containers. Include the modules your
-project needs, choose the tool images, and compose your project commands in a
-Taskfile. Developers and CI then call those same commands.
-
-- **Less host setup:** run tools without installing each language toolchain and
-  CLI locally.
-- **One execution path:** local development and CI call the same project task,
-  shared module, and selected image.
-- **Reuse across projects:** include versioned modules instead of copying shell
-  scripts and `docker run` commands.
-- **Adopt one task at a time:** keep your editor, application configuration, and
-  existing CI provider.
-
-Read the [concept](concept.md) for the reasoning and responsibility boundaries.
+Reusable [Task](https://taskfile.dev/) modules that run development tools in
+containers. Developers and CI call the same project command in the same image.
+See the [concept](concept.md).
 
 ## Quick start
 
-Requirements: [Task 3.53.1+](https://taskfile.dev/docs/installation), Git, and
-Docker on Linux or macOS.
-
-In a npm project with a committed `package-lock.json` and a `build` script,
-create `Taskfile.yml`:
+Requires [Task 3.53.1+](https://taskfile.dev/docs/installation), Git and Docker.
 
 ```yaml
 version: '3.53.1'
@@ -53,184 +34,37 @@ tasks:
           SCRIPT: build
 ```
 
-Run it from your local environment:
-
 ```sh
-task ci/build
+task ci/build                                           # locally
+task --trusted-hosts raw.githubusercontent.com ci/build # in CI
 ```
 
-`npm ci` and `npm run build` run in the selected container; project files stay
-on the host and npm downloads are cached in `.cache/node`.
+## Modules
 
-## Run the same task in CI
-
-```sh
-task --trusted-hosts raw.githubusercontent.com ci/build
-```
-
-The CI job owns checkout, credentials, scheduling, and artifact upload. The
-Taskfile owns the build command.
-
-## Available modules
-
-Include only the modules your project needs. Follow the links for the exact
-tasks, inputs, and defaults.
-
-| Module | Purpose |
+| Module | Tools |
 | -- | -- |
-| [Go](taskfiles/golang/Taskfile.yml) | Containerized development and CI workflows for Go projects. |
-| [Markdown](taskfiles/markdown/Taskfile.yml) | Containerized Markdown formatting with configurable style. |
-| [Nix](taskfiles/nix/Taskfile.yml) | Containerized formatting, linting, and Nix commands. |
-| [Node.js](taskfiles/node/Taskfile.yml) | Containerized npm workflows for Node.js projects. |
-| [Python](taskfiles/python/Taskfile.yml) | Containerized uv workflows for Python projects. |
-| [Rust](taskfiles/rust/Taskfile.yml) | Containerized development and CI workflows for Rust projects. |
-| [Protobuf](taskfiles/proto/Taskfile.yml) | Containerized validation and formatting for Protobuf schemas. |
-| [Terraform](taskfiles/terraform/Taskfile.yml) | Containerized workflows for Terraform configurations. |
-| [AWS](taskfiles/aws/Taskfile.yml) | Containerized static-site delivery through Amazon S3 and CloudFront. |
-| [Docker](taskfiles/docker/Taskfile.yml) | Shared container runner used by the tool modules. |
+| [Go](taskfiles/golang/Taskfile.yml) | gofumpt, golangci-lint, govulncheck |
+| [Rust](taskfiles/rust/Taskfile.yml) | cargo, clippy, cargo-audit |
+| [Python](taskfiles/python/Taskfile.yml) | uv, Ruff, mypy, pytest |
+| [Node.js](taskfiles/node/Taskfile.yml) | npm |
+| [Nix](taskfiles/nix/Taskfile.yml) | nixfmt, statix, deadnix |
+| [Protobuf](taskfiles/proto/Taskfile.yml) | Buf, clang-format |
+| [Terraform](taskfiles/terraform/Taskfile.yml) | Terraform |
+| [Markdown](taskfiles/markdown/Taskfile.yml) | mdformat |
+| [AWS](taskfiles/aws/Taskfile.yml) | AWS CLI |
 
-## Module contract
+`task --list` shows the tasks of every non-internal include.
 
-Every module follows the same rules, so a project that knows one module knows
-them all.
+## Conventions
 
-### Tasks
-
-- `<verb>` checks and never changes files; `<verb>/fix` applies the changes with
-  the same tool.
-- Shared verbs: `fmt`, `lint`, `test`, `audit`, `typecheck`, `docs`, `build`.
-  Other tasks keep their tool's vocabulary.
-- `/fix` is reserved for the writing mode; any other suffix names a variant of
-  the task (`docs/nightly`).
-- `fmt`, `lint`, `typecheck` and `audit` mount the project read-only by default;
-  `CONTAINER_MOUNT_MODE=rw` overrides it.
-- `exec` runs any command in the module's container, with the module's mounts,
-  cache and environment.
-
-| Module | Tasks |
-| -- | -- |
-| Go | `exec` `fmt` `fmt/fix` `lint` `lint/fix` `test` `audit` `build` `tidy` `vendor` |
-| Rust | `exec` `fmt` `fmt/fix` `lint` `lint/fix` `test` `audit` `audit/fix` `docs` `build` `check` `bench` `docs/nightly` `package/list` `publish/dry-run` |
-| Python | `exec` `fmt` `fmt/fix` `lint` `lint/fix` `test` `audit` `typecheck` `build` `package/check` `tag/check` |
-| Node.js | `exec` `audit` `run` |
-| Nix | `exec` `fmt` `fmt/fix` `lint` `lint/fix` |
-| Protobuf | `exec` `fmt` `fmt/fix` `lint` `build` `breaking` |
-| Terraform | `exec` `fmt` `fmt/fix` `validate` `plan` |
-| Markdown | `exec` `fmt` `fmt/fix` |
-| AWS | `exec` `s3/upload/static` `cloudfront/cache/invalidate` |
-
-`task --list` shows every task with its description.
-
-### Variables
-
-| Variable | Meaning |
-| -- | -- |
-| `<TASK>_ARGS` | Arguments appended after the mode flags the task owns. Named after the task: `FMT_ARGS`, `DOCS_NIGHTLY_ARGS`. `<verb>/fix` reads the variable of `<verb>`; a task that runs several tools reads `<TOOL>_ARGS` (`STATIX_ARGS`, `DEADNIX_ARGS`). |
-| `<AREA>_DIR` | Working directory, relative to `PROJECT_ROOT`. Default: `.`. |
-| `<AREA>_VERSION`, `<AREA>_IMAGE` | Tool image, see [Image version](#image-version). |
-| `<AREA>_CACHE_DIR` | Host cache directory, relative to `PROJECT_ROOT` (Go, Rust, Python, Node.js, Terraform). Default: `.cache/<area>`. |
-| `PROJECT_ROOT` | Directory mounted at `/workspace`. Default: the Git repository root. |
-| `CONTAINER_*` | Container options shared by every module: `ENGINE`, `PULL_POLICY`, `MOUNT_MODE`, `USER`, `ENVS`, `VOLUMES`, `PORTS`, `RUN_ARGS`. |
-
-Area prefixes: `GO`, `RUST`, `PYTHON`, `NODE`, `NIX`, `PROTO`, `TERRAFORM`,
-`MARKDOWN`, `AWS`. An empty value counts as unset.
-
-`CONTAINER_*` can also come from the environment, so a CI job that obtains
-credentials can declare what to forward.
-
-### Credentials
-
-Modules forward variables by name, so their values never appear on a command
-line. Terraform forwards its own variables, `TF_VAR_*` and `TF_TOKEN_*`; the AWS
-module forwards the AWS credential variables. Provider credentials belong to the
-project or the CI job: forward variables with `CONTAINER_ENVS`, mount credential
-files with `CONTAINER_VOLUMES`. The container's `HOME` is `/tmp`.
-
-| Provider | CI | Local |
-| -- | -- | -- |
-| AWS | `CONTAINER_ENVS: AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_REGION` | `CONTAINER_VOLUMES: '{{.HOME}}/.aws:/tmp/.aws:ro'`, `CONTAINER_ENVS: AWS_PROFILE` |
-| GCP | `CONTAINER_ENVS: GOOGLE_OAUTH_ACCESS_TOKEN GOOGLE_PROJECT` | `CONTAINER_VOLUMES: '{{.HOME}}/.config/gcloud:/tmp/.config/gcloud:ro'` |
-| Azure | `CONTAINER_ENVS: ARM_CLIENT_ID ARM_TENANT_ID ARM_SUBSCRIPTION_ID ARM_USE_OIDC ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN` | `CONTAINER_ENVS: ARM_CLIENT_ID ARM_CLIENT_SECRET ARM_TENANT_ID ARM_SUBSCRIPTION_ID` |
-
-A credential file outside the project, such as `GOOGLE_APPLICATION_CREDENTIALS`,
-is mounted and pointed to:
-`CONTAINER_VOLUMES: '{{.GOOGLE_APPLICATION_CREDENTIALS}}:/tmp/gcp.json:ro'` with
-`CONTAINER_ENVS: GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp.json`.
-
-### Image version
-
-A module selects its image in this order:
-
-1. `<AREA>_IMAGE`: any image reference.
-1. `<AREA>_VERSION`: a tag of `ghcr.io/mr-chelyshkin/ci/<area>`.
-1. The ecosystem's pin file in `<AREA>_DIR`.
-1. The module default.
-
-Image tags are exact versions, so a version must have the form `X.Y.Z`.
-
-| Module | Pin file | Default |
-| -- | -- | -- |
-| Go | `go.mod`: `toolchain goX.Y.Z`, otherwise `go X.Y.Z` | — |
-| Rust | `rust-toolchain.toml`: `channel` | — |
-| Python | `.python-version` | — |
-| Node.js | `.node-version`, then `.nvmrc` | `22.23.1` |
-| Terraform | `.terraform-version` | `1.15.9` |
-| Nix, Protobuf, Markdown, AWS | — | `2.35.2`, `1.50.0`, `1.0.0`, `2.36.24` |
-
-### Project-specific commands
-
-`exec` takes `CMD` and splits it like a shell command line. Wrap shell snippets
-in single quotes:
-
-```yaml
-tasks:
-  ci/generate:
-    desc: Check that generated code is up to date.
-    cmds:
-      - task: golang:exec
-        vars:
-          CMD: sh -c 'go generate ./... && git diff --exit-code'
-```
-
-To change container options for one call, pass `TASK_CONTEXT`. Later maps win in
-`merge`, so `merge (dict …) (.TASK_CONTEXT | default .)` sets a default and
-`merge (.TASK_CONTEXT | default .) (dict …)` forces a value:
-
-```yaml
-      - task: markdown:fmt
-        vars:
-          TASK_CONTEXT:
-            ref: 'merge (dict "CONTAINER_MOUNT_MODE" "ro") (.TASK_CONTEXT | default .)'
-```
-
-### Upgrading from v0.0.x
-
-| Before | After |
-| -- | -- |
-| `_go/tool`, `_cargo/tool`, `_uv/tool`, `_npm/tool`, `_nix/tool`, `_proto/tool`, `_terraform/tool`, `_markdown/tool`, `_aws/tool` | `exec` |
-| `golang:gofumpt`, `golang:golangci`, `golang:govulncheck` | `golang:fmt`, `golang:lint`, `golang:audit` |
-| `rust:clippy`, `rust:doc/build`, `rust:doc/build-nightly` | `rust:lint`, `rust:docs`, `rust:docs/nightly` |
-| `nix:nixfmt`, `nix:nixfmt FMT_ARGS=''`, `nix:statix`, `nix:deadnix` | `nix:fmt`, `nix:fmt/fix`, `nix:lint` |
-| `proto:format/clang`, `proto:format/clang/fix` | `proto:fmt`, `proto:fmt/fix` |
-| `VULN_ARGS`, `DOC_ARGS`, `FORMAT_ARGS`, `FMT_PATHS` | `AUDIT_ARGS`, `DOCS_ARGS`, `FMT_ARGS`, `FMT_ARGS` |
-| `BUF_ARGS` | `LINT_ARGS` for `lint`, `BUILD_ARGS` for `build` |
-| `PACKAGE_ARGS`, `PUBLISH_ARGS` | `PACKAGE_LIST_ARGS`, `PUBLISH_DRY_RUN_ARGS` |
-| `APP_DIR` (default `app`), `AUDIT_LEVEL` | `NODE_DIR` (default `.`), `AUDIT_ARGS` (default `--audit-level=high`) |
-| `TERRAFORM_DIR` default `tf` | default `.` |
-| Mode flags in `*_ARGS`: `-l` (gofumpt), `--check` (cargo fmt, ruff), `-check -diff` (terraform) | Owned by the task; pass only extra arguments |
-| `STATIX_ARGS` / `DEADNIX_ARGS` with targets and `--fail`; nixfmt over every `*.nix` file | Options only; Nix and Protobuf tasks take files from Git, honouring `.gitignore` |
-| Rust version from `rust-version` in `Cargo.toml` | `channel` in `rust-toolchain.toml`, or `RUST_VERSION` |
-| Rust defaults without `--locked` | `--locked` in the defaults of `lint`, `test`, `check`, `bench`, `build`, `docs`, `publish/dry-run` |
-| `TF_VAR_*` listed in `CONTAINER_ENVS` for Terraform | Forwarded by the module, with `TF_TOKEN_*`; provider credentials stay in `CONTAINER_ENVS` |
-| `proto:breaking` default baseline only at the repository root | Works in any `PROTO_DIR` |
-| Check tasks mount the project read-write | `fmt`, `lint`, `typecheck`, `audit` mount it read-only by default |
-| `node:audit` runs `npm ci` first | Audits `package-lock.json` without installing |
-
-## Learn more
-
-- [Concept and design boundaries](concept.md)
-- [Taskfile composition and variables](https://taskfile.dev/docs/guide)
-- [Taskfile schema versions](https://taskfile.dev/docs/taskfile-versions)
+- `<verb>` checks, `<verb>/fix` writes: `fmt`, `lint`, `test`, `audit`,
+  `typecheck`, `docs`, `build`. Checks mount the project read-only.
+- `<TASK>_ARGS` passes extra arguments to a task: `FMT_ARGS`, `TEST_ARGS`.
+- The image comes from `<AREA>_IMAGE`, `<AREA>_VERSION`, the project's pin file
+  (`go.mod`, `rust-toolchain.toml`, `.python-version`, …) or the module default.
+- `CONTAINER_*` options and `PROJECT_ROOT` work in every module; credentials are
+  forwarded with `CONTAINER_ENVS` and `CONTAINER_VOLUMES`.
+- `<module>:exec CMD=…` runs any command in the module's container.
 
 ## Related repositories
 
