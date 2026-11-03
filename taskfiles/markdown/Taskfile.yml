@@ -24,7 +24,7 @@ tasks:
       configured_root: '{{.context.PROJECT_ROOT | default .git_root}}'
       project_root:    '{{if isAbs .configured_root}}{{.configured_root}}{{else}}{{joinPath .ROOT_DIR .configured_root | absPath}}{{end}}'
       dir:             '{{.context.MARKDOWN_DIR | default "."}}'
-      version:         '{{.context.MARKDOWN_VERSION | default "1.0.0"}}'
+      version:         '{{.context.MARKDOWN_VERSION | default "1.1.0"}}'
       image:           '{{.context.MARKDOWN_IMAGE | default (printf "ghcr.io/mr-chelyshkin/ci/markdown:%s" .version)}}'
     preconditions:
       - sh: test -d {{joinPath .project_root .dir | shellQuote}}
