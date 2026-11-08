@@ -17,13 +17,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check tag format
-        uses: mr-chelyshkin/actions/tag-format-check@v2
+        uses: mr-chelyshkin/actions/tag-format-check@v3
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Check that the tag is on main
-        uses: mr-chelyshkin/actions/tag-branch-check@v2
+        uses: mr-chelyshkin/actions/tag-branch-check@v3
         with:
           branch: main
 
@@ -35,7 +35,7 @@ jobs:
       contents: write
     steps:
       - name: Create GitHub release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
